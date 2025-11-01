@@ -13,4 +13,8 @@ cardstack-lib = { path = "../cardstack-lib" }
 clap.workspace = true
 anyhow.workspace = true
 flate2.workspace = true
+walkdir.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+chrono.workspace = true
 
