@@ -12,4 +12,8 @@ path = "src/main.rs"
 cardstack-lib = { path = "../cardstack-lib" }
 clap.workspace = true
 anyhow.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+walkdir.workspace = true
+chrono.workspace = true
 
