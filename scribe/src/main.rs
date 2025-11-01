@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
-use cardstack_lib::{card::Card, serialize, uid};
+use cardstack_lib::{
+    card::{Card, CollectionFacet, CollectionMode, Facets},
+    serialize, uid,
+};
 use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -88,6 +91,37 @@ enum Commands {
         to: String,
         #[arg(long)]
         r#type: Option<String>,
+    },
+    /// Deck operations
+    #[command(subcommand, name = "deck")]
+    Deck(DeckCommands),
+}
+
+#[derive(Subcommand)]
+enum DeckCommands {
+    /// Create a new deck (card with collection facet)
+    New {
+        name: String,
+        #[arg(long)]
+        mode: Option<String>,
+        #[arg(long)]
+        query: Option<String>,
+    },
+    /// Add cards to a deck
+    Add {
+        deck: String,
+        cards: Vec<String>,
+    },
+    /// Remove cards from a deck
+    Remove {
+        deck: String,
+        cards: Vec<String>,
+    },
+    /// Snapshot a dynamic deck to static
+    Snapshot {
+        deck: String,
+        #[arg(long)]
+        out: String,
     },
 }
 
@@ -195,12 +229,14 @@ fn load_card(repo: &Path, identifier: &str) -> Result<Card> {
     Ok(card)
 }
 
+fn find_card_file_path(repo: &Path, identifier: &str) -> Result<PathBuf> {
+    find_card_file(repo, identifier)
+}
+
 fn save_card(repo: &Path, card: &mut Card) -> Result<PathBuf> {
     // Update timestamps
     card.updated = chrono::Utc::now();
-    if card.version == 0 {
-        card.version = 1;
-    }
+    card.version += 1;
     
     // Determine path
     let dir = card_path(repo, card);
@@ -208,6 +244,14 @@ fn save_card(repo: &Path, card: &mut Card) -> Result<PathBuf> {
     
     let filename = format!("{}--{}.yaml", card.uid, card.slug);
     let file_path = dir.join(&filename);
+    
+    // If card file exists elsewhere (e.g., after edit that moved it), remove old file
+    let old_file = find_card_file_path(repo, &card.uid).ok();
+    if let Some(old) = &old_file {
+        if old != &file_path && old.exists() {
+            fs::remove_file(old)?;
+        }
+    }
     
     // Serialize and write
     let content = serialize::write_card_file(card)?;
@@ -284,9 +328,350 @@ fn main() -> Result<()> {
                 }
             }
         }
-        _ => {
-            eprintln!("Command not yet implemented");
-            std::process::exit(1);
+        Commands::Edit {
+            identifier,
+            title,
+            slug,
+            field,
+            unset,
+            set_body,
+            append_body,
+        } => {
+            let repo = get_repo_root(cli.repo.clone())?;
+            let mut card = load_card(&repo, identifier)?;
+            
+            if let Some(new_title) = title {
+                card.title = new_title.clone();
+            }
+            
+            if let Some(new_slug) = slug {
+                card.slug = new_slug.clone();
+            }
+            
+            // Update fields
+            for f in field {
+                if let Some((k, v)) = f.split_once('=') {
+                    card.fields.insert(k.to_string(), serde_json::Value::String(v.to_string()));
+                }
+            }
+            
+            // Unset fields
+            for k in unset {
+                card.fields.remove(k.as_str());
+            }
+            
+            // Set or append body
+            if let Some(body_path) = set_body {
+                let body_content = fs::read_to_string(body_path)?;
+                card = card.with_content(body_content);
+            } else if let Some(body_path) = append_body {
+                let body_content = fs::read_to_string(body_path)?;
+                let existing = card.get_content().unwrap_or("").to_string();
+                card = card.with_content(format!("{}\n\n{}", existing, body_content));
+            }
+            
+            let file_path = save_card(&repo, &mut card)?;
+            if !cli.json {
+                println!("Updated card: {}", file_path.display());
+            }
+        }
+        Commands::Archive { identifier } => {
+            let repo = get_repo_root(cli.repo.clone())?;
+            let mut card = load_card(&repo, identifier)?;
+            
+            // Soft-delete: set status field or move to archive
+            card.fields.insert("archived".to_string(), serde_json::Value::Bool(true));
+            card.fields.insert("archived_at".to_string(), serde_json::Value::String(chrono::Utc::now().to_rfc3339()));
+            
+            save_card(&repo, &mut card)?;
+            if !cli.json {
+                println!("Archived card: {}", identifier);
+            }
+        }
+        Commands::Fork {
+            identifier,
+            with_links,
+        } => {
+            let repo = get_repo_root(cli.repo.clone())?;
+            let source = load_card(&repo, identifier)?;
+            
+            let new_uid = uid::generate_uid();
+            let new_slug = format!("{}-fork", source.slug);
+            let mut forked = Card::new(
+                format!("{} (fork)", source.title),
+                new_slug.clone(),
+                new_uid.clone(),
+            );
+            
+            // Copy content if present
+            if let Some(body) = source.get_content() {
+                forked = forked.with_content(body.to_string());
+            }
+            
+            // Copy metadata
+            forked.tags = source.tags.clone();
+            forked.keywords = source.keywords.clone();
+            forked.fields = source.fields.clone();
+            
+            // Copy links if requested
+            if *with_links {
+                forked.links = source.links.clone();
+            }
+            
+            // Add provenance link
+            forked.links.push(cardstack_lib::card::Link {
+                r#type: "derived-from".to_string(),
+                to: source.uid.clone(),
+            });
+            
+            let file_path = save_card(&repo, &mut forked)?;
+            if !cli.json {
+                println!("Forked card: {} -> {}", identifier, new_uid);
+                println!("New card: {}", file_path.display());
+            }
+        }
+        Commands::Merge { src, dst, strategy: _ } => {
+            let repo = get_repo_root(cli.repo.clone())?;
+            let mut src_card = load_card(&repo, src)?;
+            let mut dst_card = load_card(&repo, dst)?;
+            
+            // Merge bodies
+            let src_body = src_card.get_content().unwrap_or("").to_string();
+            let dst_body = dst_card.get_content().unwrap_or("").to_string();
+            if !src_body.is_empty() {
+                let merged_body = if dst_body.is_empty() {
+                    src_body
+                } else {
+                    format!("{}\n\n---\n\n{}", dst_body, src_body)
+                };
+                dst_card = dst_card.with_content(merged_body);
+            }
+            
+            // Merge tags (union)
+            for tag in &src_card.tags {
+                if !dst_card.tags.contains(tag) {
+                    dst_card.tags.push(tag.clone());
+                }
+            }
+            
+            // Merge fields (keep dst, note conflicts)
+            for (k, v) in &src_card.fields {
+                if dst_card.fields.contains_key(k) && dst_card.fields[k] != *v {
+                    // Conflict - store in _conflicts
+                    if !dst_card.fields.contains_key("_conflicts") {
+                        dst_card.fields.insert("_conflicts".to_string(), serde_json::Value::Object(serde_json::Map::new()));
+                    }
+                } else {
+                    dst_card.fields.insert(k.clone(), v.clone());
+                }
+            }
+            
+            // Add provenance link
+            dst_card.links.push(cardstack_lib::card::Link {
+                r#type: "derived-from".to_string(),
+                to: src_card.uid.clone(),
+            });
+            
+            // Archive source
+            src_card.fields.insert("archived".to_string(), serde_json::Value::Bool(true));
+            src_card.fields.insert("merged_into".to_string(), serde_json::Value::String(dst_card.uid.clone()));
+            save_card(&repo, &mut src_card)?;
+            
+            let file_path = save_card(&repo, &mut dst_card)?;
+            if !cli.json {
+                println!("Merged {} into {}", src, dst);
+                println!("Updated: {}", file_path.display());
+            }
+        }
+        Commands::Link { from, to, r#type } => {
+            let repo = get_repo_root(cli.repo.clone())?;
+            let mut from_card = load_card(&repo, from)?;
+            
+            // Validate target exists
+            let _to_card = load_card(&repo, to)?;
+            
+            // Check if link already exists
+            let link_exists = from_card.links.iter()
+                .any(|l| l.r#type == *r#type && l.to == *to);
+            
+            if !link_exists {
+                from_card.links.push(cardstack_lib::card::Link {
+                    r#type: r#type.clone(),
+                    to: to.clone(),
+                });
+                
+                save_card(&repo, &mut from_card)?;
+                if !cli.json {
+                    println!("Linked {} --[{}]--> {}", from, r#type, to);
+                }
+            } else if !cli.json {
+                println!("Link already exists");
+            }
+        }
+        Commands::Unlink { from, to, r#type } => {
+            let repo = get_repo_root(cli.repo.clone())?;
+            let mut from_card = load_card(&repo, from)?;
+            
+            let initial_len = from_card.links.len();
+            if let Some(type_filter) = r#type {
+                from_card.links.retain(|l| !(l.r#type == *type_filter && l.to == *to));
+            } else {
+                from_card.links.retain(|l| l.to != *to);
+            }
+            
+            if from_card.links.len() < initial_len {
+                save_card(&repo, &mut from_card)?;
+                if !cli.json {
+                    println!("Unlinked {} from {}", from, to);
+                }
+            } else if !cli.json {
+                println!("Link not found");
+            }
+        }
+        Commands::Deck(cmd) => {
+            let repo = get_repo_root(cli.repo.clone())?;
+            match cmd {
+                DeckCommands::New { name, mode, query } => {
+                    let uid = uid::generate_uid();
+                    let slug = name.to_lowercase()
+                        .chars()
+                        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+                        .collect::<String>();
+                    
+                    let mode_str = mode.as_deref().unwrap_or("static");
+                    let collection_mode = match mode_str {
+                        "query" => CollectionMode::Query,
+                        "hybrid" => CollectionMode::Hybrid,
+                        _ => CollectionMode::Static,
+                    };
+                    
+                    let mut card = Card::new(name.clone(), slug.clone(), uid.clone());
+                    
+                    // Create collection facet
+                    let mut collection = CollectionFacet {
+                        mode: collection_mode,
+                        members: Vec::new(),
+                        query: None,
+                        view: None,
+                    };
+                    
+                    if let Some(query_str) = query {
+                        // Parse query DSL to canonical JSON
+                        let query_json = cardstack_lib::query::parse_query_shorthand(&query_str)?;
+                        collection.query = Some(serde_json::to_value(&query_json)?);
+                    }
+                    
+                    let facets = Facets {
+                        content: None,
+                        collection: Some(collection),
+                        template: None,
+                    };
+                    card.facets = Some(facets);
+                    
+                    let file_path = save_card(&repo, &mut card)?;
+                    if !cli.json {
+                        println!("Created deck: {} ({})", name, uid);
+                        println!("Path: {}", file_path.display());
+                    }
+                }
+                DeckCommands::Add { deck, cards } => {
+                    let mut deck_card = load_card(&repo, deck)?;
+                    
+                    let facets = deck_card.facets.get_or_insert_with(|| Facets {
+                        content: None,
+                        collection: Some(CollectionFacet {
+                            mode: CollectionMode::Static,
+                            members: Vec::new(),
+                            query: None,
+                            view: None,
+                        }),
+                        template: None,
+                    });
+                    
+                    let collection = facets.collection.get_or_insert_with(|| CollectionFacet {
+                        mode: CollectionMode::Static,
+                        members: Vec::new(),
+                        query: None,
+                        view: None,
+                    });
+                    
+                    for card_id in cards {
+                        let card = load_card(&repo, card_id)?;
+                        if !collection.members.contains(&card.uid) {
+                            collection.members.push(card.uid.clone());
+                            deck_card.links.push(cardstack_lib::card::Link {
+                                r#type: "contains".to_string(),
+                                to: card.uid,
+                            });
+                        }
+                    }
+                    
+                    save_card(&repo, &mut deck_card)?;
+                    if !cli.json {
+                        println!("Added {} card(s) to deck {}", cards.len(), deck);
+                    }
+                }
+                DeckCommands::Remove { deck, cards } => {
+                    let mut deck_card = load_card(&repo, deck)?;
+                    
+                    if let Some(facets) = &mut deck_card.facets {
+                        if let Some(collection) = &mut facets.collection {
+                            for card_id in cards {
+                                let card = load_card(&repo, card_id)?;
+                                collection.members.retain(|m| m != &card.uid);
+                                deck_card.links.retain(|l| !(l.r#type == "contains" && l.to == card.uid));
+                            }
+                        }
+                    }
+                    
+                    save_card(&repo, &mut deck_card)?;
+                    if !cli.json {
+                        println!("Removed {} card(s) from deck {}", cards.len(), deck);
+                    }
+                }
+                DeckCommands::Snapshot { deck, out } => {
+                    let deck_card = load_card(&repo, deck)?;
+                    
+                    // TODO: Resolve query deck members if dynamic
+                    // For now, just create a static copy
+                    let snapshot_uid = uid::generate_uid();
+                    let snapshot_slug = out.clone();
+                    
+                    let mut snapshot = Card::new(
+                        format!("{} (snapshot)", deck_card.title),
+                        snapshot_slug.clone(),
+                        snapshot_uid.clone(),
+                    );
+                    
+                    if let Some(facets) = &deck_card.facets {
+                        if let Some(collection) = &facets.collection {
+                            let snapshot_collection = CollectionFacet {
+                                mode: CollectionMode::Static,
+                                members: collection.members.clone(),
+                                query: None,
+                                view: collection.view.clone(),
+                            };
+                            
+                            snapshot.facets = Some(Facets {
+                                content: None,
+                                collection: Some(snapshot_collection),
+                                template: None,
+                            });
+                        }
+                    }
+                    
+                    snapshot.links.push(cardstack_lib::card::Link {
+                        r#type: "snapshot-of".to_string(),
+                        to: deck_card.uid.clone(),
+                    });
+                    
+                    let file_path = save_card(&repo, &mut snapshot)?;
+                    if !cli.json {
+                        println!("Snapshotted deck {} to {}", deck, snapshot_uid);
+                        println!("Path: {}", file_path.display());
+                    }
+                }
+            }
         }
     }
     

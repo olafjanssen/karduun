@@ -1,3 +1,4 @@
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 /// Canonical Query representation
@@ -24,7 +25,7 @@ pub enum Filter {
 /// Examples:
 /// - `status=draft tag:design` → `{filter: {all: ["fields.status = \"draft\"", "tags contains \"design\""]}}`
 /// - `status=draft sort:-updated,title limit:50`
-pub fn parse_query_shorthand(shorthand: &str) -> Result<Query, String> {
+pub fn parse_query_shorthand(shorthand: &str) -> anyhow::Result<Query> {
     let mut query = Query {
         filter: None,
         sort: Vec::new(),
@@ -40,7 +41,7 @@ pub fn parse_query_shorthand(shorthand: &str) -> Result<Query, String> {
             query.sort = sorts.split(',').map(|s| s.to_string()).collect();
         } else if part.starts_with("limit:") {
             let limit_str = part.strip_prefix("limit:").unwrap();
-            query.limit = Some(limit_str.parse().map_err(|_| format!("Invalid limit: {}", limit_str))?);
+            query.limit = Some(limit_str.parse().with_context(|| format!("Invalid limit: {}", limit_str))?);
         } else if part.starts_with("tag:") {
             let tag = part.strip_prefix("tag:").unwrap();
             predicates.push(format!("tags contains \"{}\"", tag));
@@ -64,7 +65,7 @@ pub fn parse_query_shorthand(shorthand: &str) -> Result<Query, String> {
                 predicates.push(format!("link:{}", link_expr));
             }
         } else {
-            return Err(format!("Unrecognized query part: {}", part));
+            anyhow::bail!("Unrecognized query part: {}", part);
         }
     }
 
