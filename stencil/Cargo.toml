@@ -1,0 +1,15 @@
+[package]
+name = "stencil"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "stencil"
+path = "src/main.rs"
+
+[dependencies]
+cardstack-lib = { path = "../cardstack-lib" }
+clap.workspace = true
+anyhow.workspace = true
+

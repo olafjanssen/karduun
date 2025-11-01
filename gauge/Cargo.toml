@@ -1,0 +1,16 @@
+[package]
+name = "gauge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "gauge"
+path = "src/main.rs"
+
+[dependencies]
+cardstack-lib = { path = "../cardstack-lib" }
+clap.workspace = true
+anyhow.workspace = true
+flate2.workspace = true
+

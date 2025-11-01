@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Card",
+  "type": "object",
+  "required": ["kind", "schema", "uid", "slug", "title", "created", "updated", "version"],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "card"
+    },
+    "schema": {
+      "type": "integer",
+      "const": 1
+    },
+    "uid": {
+      "type": "string",
+      "pattern": "^ulid_[A-Z0-9]{26}$|^[A-Z0-9]{26}$"
+    },
+    "slug": {
+      "type": "string",
+      "minLength": 1
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "author": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "created": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "keywords": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "fields": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "to"],
+        "properties": {
+          "type": { "type": "string" },
+          "to": { "type": "string" }
+        }
+      }
+    },
+    "facets": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "object",
+          "properties": {
+            "mime": { "type": "string", "default": "text/markdown" },
+            "body": { "type": "string" }
+          },
+          "required": ["mime", "body"]
+        },
+        "collection": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["static", "query", "hybrid"]
+            },
+            "members": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "query": { "type": "object" },
+            "view": {
+              "type": "object",
+              "properties": {
+                "layout": { "type": "string" },
+                "group_by": { "type": "string" },
+                "columns": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            }
+          },
+          "required": ["mode"]
+        },
+        "template": {
+          "type": "object",
+          "properties": {
+            "defaults": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "constraints": {
+              "type": "object",
+              "properties": {
+                "required_fields": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "enum_fields": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array"
+                  }
+                },
+                "frozen_fields": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sign": {
+      "type": "object",
+      "properties": {
+        "algo": { "type": "string" },
+        "by": { "type": "string" },
+        "sig": { "type": "string" }
+      },
+      "required": ["algo", "by", "sig"]
+    },
+    "computed": {
+      "type": "object",
+      "readOnly": true,
+      "properties": {
+        "tokens": { "type": "integer" },
+        "nid_bpt": { "type": "number" },
+        "cohesion": { "type": "number" },
+        "bandwidth": { "type": "integer" },
+        "redundancy": { "type": "number" },
+        "link_density": { "type": "number" },
+        "structure_density": { "type": "number" },
+        "sv": { "type": "number" },
+        "last_analyzed": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}
+

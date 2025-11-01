@@ -1,0 +1,38 @@
+[workspace]
+members = [
+    "cardstack-lib",
+    "scribe",
+    "scout",
+    "catalog",
+    "gauge",
+    "curator",
+    "stencil",
+    "porter",
+    "notary",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Cardstack Contributors"]
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+thiserror = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+ulid = "1.2"
+regex = "1.10"
+walkdir = "2.4"
+sha2 = "0.10"
+flate2 = "1.0"
+rusqlite = { version = "0.31", features = ["bundled"] }
+jsonschema = "0.18"
+blake3 = "1.5"
+hex = "0.4"
+

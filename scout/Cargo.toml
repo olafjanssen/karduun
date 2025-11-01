@@ -1,0 +1,15 @@
+[package]
+name = "scout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "scout"
+path = "src/main.rs"
+
+[dependencies]
+cardstack-lib = { path = "../cardstack-lib" }
+clap.workspace = true
+anyhow.workspace = true
+

@@ -1,0 +1,17 @@
+[package]
+name = "catalog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "catalog"
+path = "src/main.rs"
+
+[dependencies]
+cardstack-lib = { path = "../cardstack-lib" }
+clap.workspace = true
+anyhow.workspace = true
+rusqlite.workspace = true
+walkdir.workspace = true
+

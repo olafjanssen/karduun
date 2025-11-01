@@ -1,0 +1,15 @@
+[package]
+name = "porter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "porter"
+path = "src/main.rs"
+
+[dependencies]
+cardstack-lib = { path = "../cardstack-lib" }
+clap.workspace = true
+anyhow.workspace = true
+
