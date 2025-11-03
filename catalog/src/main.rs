@@ -113,12 +113,12 @@ fn init_database(db_path: &Path) -> Result<Connection> {
     )?;
     
     // Create FTS5 virtual table for full-text search
+    // Drop existing table if it exists (in case schema changed)
+    let _ = conn.execute("DROP TABLE IF EXISTS fts", []);
     conn.execute(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(
+        "CREATE VIRTUAL TABLE fts USING fts5(
             uid UNINDEXED,
-            body,
-            content='',
-            content_rowid='uid'
+            body
         )",
         [],
     )?;
@@ -156,8 +156,16 @@ fn rebuild_index(repo: &Path) -> Result<()> {
     let cards = load_all_cards(repo)?;
     println!("Found {} card(s)", cards.len());
     
-    // Clear existing data
-    conn.execute("DELETE FROM fts", [])?;
+    // Clear existing data (drop FTS table first in case schema changed)
+    let _ = conn.execute("DROP TABLE IF EXISTS fts", []);
+    // Recreate FTS table with correct schema
+    conn.execute(
+        "CREATE VIRTUAL TABLE fts USING fts5(
+            uid UNINDEXED,
+            body
+        )",
+        [],
+    )?;
     conn.execute("DELETE FROM links", [])?;
     conn.execute("DELETE FROM computed", [])?;
     conn.execute("DELETE FROM cards", [])?;

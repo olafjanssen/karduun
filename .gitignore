@@ -19,3 +19,5 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 
+# Example workspaces
+docs/tutorials/dead-philosophers
