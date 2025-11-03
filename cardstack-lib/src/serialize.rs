@@ -79,12 +79,8 @@ pub fn parse_card_file(content: &str) -> anyhow::Result<(Card, String)> {
 pub fn write_card_file(card: &Card) -> Result<String, serde_yaml::Error> {
     let yaml = deterministic_yaml(card)?;
     let body = card.get_content().unwrap_or("");
-    
-    if body.is_empty() {
-        Ok(yaml)
-    } else {
-        Ok(format!("---\n{}\n---\n{}", yaml.trim_end(), body))
-    }
+    // Always write YAML front matter delimiters, even if body is empty
+    Ok(format!("---\n{}\n---\n{}", yaml.trim_end(), body))
 }
 
 #[cfg(test)]

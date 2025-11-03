@@ -9,6 +9,7 @@ members = [
     "stencil",
     "porter",
     "notary",
+    "e2e",
 ]
 resolver = "2"
 

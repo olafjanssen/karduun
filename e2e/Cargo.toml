@@ -1,0 +1,16 @@
+[package]
+name = "e2e"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dev-dependencies]
+assert_cmd = "2.0"
+predicates = "3.1"
+tempfile = "3.10"
+serde_json.workspace = true
+walkdir.workspace = true
+
+[package.metadata]
+# no binaries; tests live in tests/
+
