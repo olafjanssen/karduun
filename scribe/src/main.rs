@@ -558,7 +558,41 @@ fn main() -> Result<()> {
                     if let Some(query_str) = query {
                         // Parse query DSL to canonical JSON
                         let query_json = cardstack_lib::query::parse_query_shorthand(&query_str)?;
-                        collection.query = Some(serde_json::to_value(&query_json)?);
+                        // Manually construct JSON Value to avoid tagged enum serialization issues
+                        let mut query_obj = serde_json::Map::new();
+                        if let Some(ref filter) = query_json.filter {
+                            let mut filter_obj = serde_json::Map::new();
+                            match filter {
+                                cardstack_lib::query::Filter::All(preds) => {
+                                    filter_obj.insert("op".to_string(), serde_json::Value::String("all".to_string()));
+                                    filter_obj.insert("predicates".to_string(), serde_json::Value::Array(
+                                        preds.iter().map(|p| serde_json::Value::String(p.clone())).collect()
+                                    ));
+                                }
+                                cardstack_lib::query::Filter::Any(preds) => {
+                                    filter_obj.insert("op".to_string(), serde_json::Value::String("any".to_string()));
+                                    filter_obj.insert("predicates".to_string(), serde_json::Value::Array(
+                                        preds.iter().map(|p| serde_json::Value::String(p.clone())).collect()
+                                    ));
+                                }
+                                cardstack_lib::query::Filter::None(preds) => {
+                                    filter_obj.insert("op".to_string(), serde_json::Value::String("none".to_string()));
+                                    filter_obj.insert("predicates".to_string(), serde_json::Value::Array(
+                                        preds.iter().map(|p| serde_json::Value::String(p.clone())).collect()
+                                    ));
+                                }
+                            }
+                            query_obj.insert("filter".to_string(), serde_json::Value::Object(filter_obj));
+                        }
+                        if !query_json.sort.is_empty() {
+                            query_obj.insert("sort".to_string(), serde_json::Value::Array(
+                                query_json.sort.iter().map(|s| serde_json::Value::String(s.clone())).collect()
+                            ));
+                        }
+                        if let Some(limit) = query_json.limit {
+                            query_obj.insert("limit".to_string(), serde_json::Value::Number(limit.into()));
+                        }
+                        collection.query = Some(serde_json::Value::Object(query_obj));
                     }
                     
                     let facets = Facets {

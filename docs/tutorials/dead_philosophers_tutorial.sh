@@ -234,7 +234,7 @@ scout list --query "tag:philosopher status=deceased" --sort "title"
 echo_section "Step 5: Creating Dynamic Deck 'Dead Philosophers'"
 
 echo_info "Creating a query-based deck that automatically includes all deceased philosophers..."
-scribe deck:new "Dead Philosophers" --mode query --query "tag:philosopher status=deceased"
+scribe deck new "Dead Philosophers" --mode query --query "tag:philosopher status=deceased"
 echo_success "Deck 'Dead Philosophers' created"
 
 echo ""

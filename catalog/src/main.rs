@@ -113,8 +113,10 @@ fn init_database(db_path: &Path) -> Result<Connection> {
     )?;
     
     // Create FTS5 virtual table for full-text search
-    // Drop existing table if it exists (in case schema changed)
+    // Try to drop existing table first (FTS5 tables need special handling)
+    // Note: DROP on FTS5 virtual tables automatically removes shadow tables
     let _ = conn.execute("DROP TABLE IF EXISTS fts", []);
+    // Create FTS table with correct schema (no IF NOT EXISTS since we just dropped it)
     conn.execute(
         "CREATE VIRTUAL TABLE fts USING fts5(
             uid UNINDEXED,
@@ -150,22 +152,27 @@ fn load_all_cards(repo: &Path) -> Result<Vec<(PathBuf, Card)>> {
 
 fn rebuild_index(repo: &Path) -> Result<()> {
     let db_path = get_index_path(repo);
+    
+    // If database exists, drop FTS table explicitly before initializing
+    // FTS5 virtual tables need special handling
+    if db_path.exists() {
+        let temp_conn = Connection::open(&db_path)?;
+        let _ = temp_conn.execute("DROP TABLE IF EXISTS fts", []);
+        // Also try to drop any shadow tables that FTS5 might create
+        let _ = temp_conn.execute("DROP TABLE IF EXISTS fts_data", []);
+        let _ = temp_conn.execute("DROP TABLE IF EXISTS fts_idx", []);
+        let _ = temp_conn.execute("DROP TABLE IF EXISTS fts_config", []);
+        let _ = temp_conn.execute("DROP TABLE IF EXISTS fts_docsize", []);
+        let _ = temp_conn.execute("DROP TABLE IF EXISTS fts_content", []);
+    }
+    
     let conn = init_database(&db_path)?;
     
     println!("Loading cards from filesystem...");
     let cards = load_all_cards(repo)?;
     println!("Found {} card(s)", cards.len());
     
-    // Clear existing data (drop FTS table first in case schema changed)
-    let _ = conn.execute("DROP TABLE IF EXISTS fts", []);
-    // Recreate FTS table with correct schema
-    conn.execute(
-        "CREATE VIRTUAL TABLE fts USING fts5(
-            uid UNINDEXED,
-            body
-        )",
-        [],
-    )?;
+    // Clear existing data
     conn.execute("DELETE FROM links", [])?;
     conn.execute("DELETE FROM computed", [])?;
     conn.execute("DELETE FROM cards", [])?;
