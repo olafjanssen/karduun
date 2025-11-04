@@ -228,51 +228,158 @@ fn save_card(repo: &Path, card: &mut Card) -> Result<PathBuf> {
 
 fn compute_card_hash(card: &Card) -> Result<String> {
     // Serialize card to canonical form for hashing
-    let yaml = serialize::deterministic_yaml(card)?;
-    let hash = cardstack_lib::canonical::blake3_hash(yaml.as_bytes());
+    // IMPORTANT: Exclude signature, computed, updated, and version from hash
+    // These are metadata fields that change without changing card content
+    // Signature covers the actual content (title, tags, fields, links, facets)
+    let mut card_for_hash = card.clone();
+    card_for_hash.sign = None;
+    card_for_hash.computed = None;
+    // Use fixed timestamp for deterministic hashing
+    // The signature covers content, not when it was last modified
+    card_for_hash.updated = card.created; // Use created time as stable reference
+    card_for_hash.version = 1; // Use base version for deterministic hash
+    
+    // Use JSON for deterministic serialization
+    // YAML serialization of HashMap is not deterministic due to hash ordering
+    // JSON with sorted collections ensures identical output for identical content
+    let json_value = serde_json::to_value(&card_for_hash)?;
+    
+    // Create a canonical JSON representation with sorted keys
+    // serde_json serializes objects deterministically, but we need to sort arrays
+    // and ensure HashMap keys are sorted by converting to sorted Vec
+    let canonical_json = canonicalize_json(&json_value)?;
+    let json_string = serde_json::to_string(&canonical_json)?;
+    let hash = cardstack_lib::canonical::blake3_hash(json_string.as_bytes());
     Ok(hash)
 }
 
+fn canonicalize_json(value: &serde_json::Value) -> Result<serde_json::Value> {
+    match value {
+        serde_json::Value::Object(map) => {
+            // Build sorted map - serde_json::Map preserves insertion order
+            let mut sorted_pairs: Vec<_> = map.iter().collect();
+            sorted_pairs.sort_by_key(|(k, _)| *k);
+            
+            let mut sorted_map = serde_json::Map::new();
+            for (k, v) in sorted_pairs {
+                sorted_map.insert(k.clone(), canonicalize_json(v)?);
+            }
+            Ok(serde_json::Value::Object(sorted_map))
+        }
+        serde_json::Value::Array(arr) => {
+            // Canonicalize each element first
+            let mut canonicalized: Vec<_> = arr.iter()
+                .map(|v| canonicalize_json(v))
+                .collect::<Result<Vec<_>>>()?;
+            
+            // Try to sort if all elements are comparable
+            // For arrays of objects, sort by a canonical representation
+            // For primitive arrays, sort directly
+            if canonicalized.iter().all(|v| v.is_string() || v.is_number() || v.is_boolean()) {
+                canonicalized.sort_by(|a, b| {
+                    // Compare string representations for deterministic ordering
+                    let a_str = serde_json::to_string(a).unwrap_or_default();
+                    let b_str = serde_json::to_string(b).unwrap_or_default();
+                    a_str.cmp(&b_str)
+                });
+            } else if canonicalized.iter().all(|v| v.is_object()) {
+                // For arrays of objects, sort by canonical string representation
+                canonicalized.sort_by(|a, b| {
+                    let a_str = serde_json::to_string(a).unwrap_or_default();
+                    let b_str = serde_json::to_string(b).unwrap_or_default();
+                    a_str.cmp(&b_str)
+                });
+            }
+            
+            Ok(serde_json::Value::Array(canonicalized))
+        }
+        _ => Ok(value.clone())
+    }
+}
+
 fn generate_key_pair() -> Result<(String, String)> {
-    // Generate Ed25519 key pair
-    // For now, use a simple approach (in production, use proper crypto library like ed25519-dalek)
-    use rand::Rng;
+    // Generate Ed25519 key pair using ed25519-dalek
+    use ed25519_dalek::SigningKey;
+    use rand::rngs::OsRng;
     use base64::{Engine as _, engine::general_purpose};
     
-    let mut rng = rand::thread_rng();
-    let secret: [u8; 32] = rng.gen();
-    let public: [u8; 32] = secret; // Simplified - in production use proper Ed25519
+    let mut csprng = OsRng;
+    let signing_key: SigningKey = SigningKey::generate(&mut csprng);
+    let verifying_key = signing_key.verifying_key();
     
-    // Encode as base64
-    let secret_b64 = general_purpose::STANDARD.encode(secret);
-    let public_b64 = general_purpose::STANDARD.encode(public);
+    // Serialize to bytes and encode as base64
+    let secret_bytes = signing_key.to_bytes();
+    let public_bytes = verifying_key.to_bytes();
+    
+    let secret_b64 = general_purpose::STANDARD.encode(secret_bytes);
+    let public_b64 = general_purpose::STANDARD.encode(public_bytes);
     
     Ok((secret_b64, public_b64))
 }
 
-fn sign_card(card: &Card, secret_key: &str) -> Result<String> {
+fn sign_card(card: &Card, secret_key: &str) -> Result<(String, String)> {
     // Compute hash of canonical card
-    let hash = compute_card_hash(card)?;
+    let hash_hex = compute_card_hash(card)?;
+    // Decode hex string to get actual hash bytes
+    let hash_bytes = hex::decode(&hash_hex)
+        .map_err(|e| anyhow::anyhow!("Failed to decode hash: {}", e))?;
     
-    // Sign hash with secret key (simplified - in production use proper Ed25519)
+    // Load signing key from base64
+    use ed25519_dalek::{SigningKey, Signer};
     use base64::{Engine as _, engine::general_purpose};
     
-    let hash_bytes = hash.as_bytes();
-    let key_bytes = general_purpose::STANDARD.decode(secret_key)?;
-    
-    // Simple XOR "signature" for now (replace with proper Ed25519)
-    let mut sig_bytes = vec![0u8; hash_bytes.len()];
-    for (i, &b) in hash_bytes.iter().enumerate() {
-        sig_bytes[i] = b ^ key_bytes[i % key_bytes.len()];
+    let key_bytes = general_purpose::STANDARD.decode(secret_key.trim())?;
+    if key_bytes.len() != 32 {
+        anyhow::bail!("Invalid signing key length: expected 32 bytes, got {}", key_bytes.len());
     }
+    let key_array: [u8; 32] = key_bytes[..32].try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid signing key length"))?;
+    let signing_key = SigningKey::from_bytes(&key_array);
     
-    Ok(general_purpose::STANDARD.encode(sig_bytes))
+    // Sign the hash
+    let signature = signing_key.sign(&hash_bytes);
+    let verifying_key = signing_key.verifying_key();
+    
+    // Encode signature and public key
+    let signature_b64 = general_purpose::STANDARD.encode(signature.to_bytes());
+    let public_key_b64 = general_purpose::STANDARD.encode(verifying_key.to_bytes());
+    
+    Ok((signature_b64, public_key_b64))
 }
 
 fn verify_signature(card: &Card, public_key: &str, signature: &str) -> Result<bool> {
-    // Recompute expected signature
-    let expected_sig = sign_card(card, public_key)?;
-    Ok(expected_sig == signature)
+    // Recompute hash of canonical card
+    let hash_hex = compute_card_hash(card)?;
+    // Decode hex string to get actual hash bytes
+    let hash_bytes = hex::decode(&hash_hex)
+        .map_err(|e| anyhow::anyhow!("Failed to decode hash: {}", e))?;
+    
+    // Load verifying key and signature from base64
+    use ed25519_dalek::{VerifyingKey, Verifier, Signature};
+    use base64::{Engine as _, engine::general_purpose};
+    
+    let public_key_bytes = general_purpose::STANDARD.decode(public_key.trim())?;
+    if public_key_bytes.len() != 32 {
+        anyhow::bail!("Invalid verifying key length: expected 32 bytes, got {}", public_key_bytes.len());
+    }
+    let public_key_array: [u8; 32] = public_key_bytes[..32].try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid verifying key length"))?;
+    let verifying_key = VerifyingKey::from_bytes(&public_key_array)
+        .map_err(|e| anyhow::anyhow!("Invalid verifying key: {}", e))?;
+    
+    let signature_bytes = general_purpose::STANDARD.decode(signature.trim())?;
+    if signature_bytes.len() != 64 {
+        anyhow::bail!("Invalid signature length: expected 64 bytes, got {}", signature_bytes.len());
+    }
+    let signature_array: [u8; 64] = signature_bytes[..64].try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid signature length"))?;
+    let signature = Signature::from_bytes(&signature_array);
+    
+    // Verify signature
+    verifying_key.verify(&hash_bytes, &signature)
+        .map_err(|e| anyhow::anyhow!("Signature verification failed: {}", e))?;
+    
+    Ok(true)
 }
 
 #[derive(serde::Serialize)]
@@ -335,17 +442,23 @@ fn main() -> Result<()> {
                     continue;
                 }
                 
-                let signature = sign_card(&card, &secret_key)?;
-                use base64::{Engine as _, engine::general_purpose};
-                let public_key = general_purpose::STANDARD.decode(&secret_key)?; // Simplified
-                let public_key_b64 = general_purpose::STANDARD.encode(&public_key[..32.min(public_key.len())]);
+                // Compute hash and sign BEFORE modifying the card
+                let (signature, public_key_b64) = sign_card(&card, &secret_key)?;
                 
+                // Create key identifier from public key (first 16 bytes as hex)
+                use base64::{Engine as _, engine::general_purpose};
+                let public_key_bytes = general_purpose::STANDARD.decode(&public_key_b64)?;
+                let key_id = hex::encode(&public_key_bytes[..16.min(public_key_bytes.len())]);
+                
+                // Add signature to card
                 card.sign = Some(cardstack_lib::card::Signature {
                     algo: "ed25519".to_string(),
-                    by: format!("key:{}", hex::encode(&public_key_b64.as_bytes()[..16.min(public_key_b64.len())])),
+                    by: format!("key:{}", key_id),
                     sig: signature,
                 });
                 
+                // Save card (updates timestamp/version, but signature remains valid
+                // because hash excludes these fields)
                 save_card(&repo, &mut card)?;
                 signed_count += 1;
                 
