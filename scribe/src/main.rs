@@ -1,10 +1,11 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use cardstack_lib::{
-    card::{Card, CollectionFacet, CollectionMode, Facets},
+    card::{Card, CardEnvelope, CollectionFacet, CollectionMode, Facets},
     serialize, uid,
 };
 use clap::{Parser, Subcommand};
 use std::fs;
+use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -95,6 +96,11 @@ enum Commands {
     /// Deck operations
     #[command(subcommand, name = "deck")]
     Deck(DeckCommands),
+    /// Import cards from JSONL (CardEnvelope format)
+    Import {
+        #[arg(long)]
+        jsonl: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -129,32 +135,8 @@ enum DeckCommands {
     },
 }
 
-fn find_repo_root(start: &Path) -> Option<PathBuf> {
-    let mut current = start.to_path_buf();
-    loop {
-        let cardstack_dir = current.join(".cardstack");
-        if cardstack_dir.exists() && cardstack_dir.is_dir() {
-            return Some(current);
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-    None
-}
-
-fn get_repo_root(repo_override: Option<PathBuf>) -> Result<PathBuf> {
-    if let Some(repo) = repo_override {
-        if repo.join(".cardstack").exists() {
-            return Ok(repo);
-        }
-        anyhow::bail!("Not a cardstack repository: {:?}", repo);
-    }
-    
-    let cwd = std::env::current_dir()?;
-    find_repo_root(&cwd)
-        .context("Not in a cardstack repository. Run 'scribe init' first.")
-}
+// Use shared repository functions
+use cardstack_lib::repository::{get_repo_root, load_card, save_card};
 
 fn init_repo(repo_path: &Path) -> Result<()> {
     let cardstack_dir = repo_path.join(".cardstack");
@@ -196,73 +178,7 @@ defaults:
     Ok(())
 }
 
-fn card_path(repo: &Path, card: &Card) -> PathBuf {
-    let year = card.created.format("%Y").to_string();
-    let month = card.created.format("%m").to_string();
-    repo.join("cards").join(&year).join(&month)
-}
-
-fn find_card_file(repo: &Path, identifier: &str) -> Result<PathBuf> {
-    // Try to find by uid or slug
-    let cards_dir = repo.join("cards");
-    
-    if !cards_dir.exists() {
-        anyhow::bail!("Cards directory not found");
-    }
-    
-    for entry in walkdir::WalkDir::new(&cards_dir) {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-            if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                // Check if identifier matches uid or slug in filename
-                if name.starts_with(identifier) || name.contains(&format!("--{}", identifier)) {
-                    return Ok(path.to_path_buf());
-                }
-            }
-        }
-    }
-    
-    anyhow::bail!("Card not found: {}", identifier)
-}
-
-fn load_card(repo: &Path, identifier: &str) -> Result<Card> {
-    let card_file = find_card_file(repo, identifier)?;
-    let content = fs::read_to_string(&card_file)?;
-    let (card, _) = serialize::parse_card_file(&content)?;
-    Ok(card)
-}
-
-fn find_card_file_path(repo: &Path, identifier: &str) -> Result<PathBuf> {
-    find_card_file(repo, identifier)
-}
-
-fn save_card(repo: &Path, card: &mut Card) -> Result<PathBuf> {
-    // Update timestamps
-    card.updated = chrono::Utc::now();
-    card.version += 1;
-    
-    // Determine path
-    let dir = card_path(repo, card);
-    fs::create_dir_all(&dir)?;
-    
-    let filename = format!("{}--{}.yaml", card.uid, card.slug);
-    let file_path = dir.join(&filename);
-    
-    // If card file exists elsewhere (e.g., after edit that moved it), remove old file
-    let old_file = find_card_file_path(repo, &card.uid).ok();
-    if let Some(old) = &old_file {
-        if old != &file_path && old.exists() {
-            fs::remove_file(old)?;
-        }
-    }
-    
-    // Serialize and write
-    let content = serialize::write_card_file(card)?;
-    fs::write(&file_path, content)?;
-    
-    Ok(file_path)
-}
+// find_card_file, load_card, and save_card are now in cardstack_lib::repository
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -530,6 +446,61 @@ fn main() -> Result<()> {
                 }
             } else if !cli.json {
                 println!("Link not found");
+            }
+        }
+        Commands::Import { jsonl: _ } => {
+            let repo = get_repo_root(cli.repo.clone())?;
+            
+            // Read CardEnvelopes from stdin, load full cards, and save them
+            let stdin = io::stdin();
+            let reader = stdin.lock();
+            let mut imported_count = 0;
+            
+            for line in reader.lines() {
+                let line = line?;
+                if line.trim().is_empty() {
+                    continue;
+                }
+                
+                // Try to parse as CardEnvelope first (for pipeline compatibility)
+                // If that fails, try parsing as full Card JSON
+                match serde_json::from_str::<CardEnvelope>(&line) {
+                    Ok(envelope) => {
+                        // Load full card from repository using UID
+                        match load_card(&repo, &envelope.uid) {
+                            Ok(mut card) => {
+                                // Save the card (will update timestamp/version)
+                                save_card(&repo, &mut card)?;
+                                imported_count += 1;
+                                if !cli.json {
+                                    println!("Imported: {} ({})", card.title, card.uid);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Warning: Could not load card {}: {}", envelope.uid, e);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Try parsing as full Card JSON
+                        match serde_json::from_str::<Card>(&line) {
+                            Ok(mut card) => {
+                                save_card(&repo, &mut card)?;
+                                imported_count += 1;
+                                if !cli.json {
+                                    println!("Imported: {} ({})", card.title, card.uid);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Warning: Could not parse card: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            if !cli.json {
+                println!("Imported {} card(s)", imported_count);
             }
         }
         Commands::Deck(cmd) => {

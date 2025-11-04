@@ -1,9 +1,7 @@
 use anyhow::{Context, Result};
-use cardstack_lib::{card::Card, card::CardEnvelope, query, serialize};
+use cardstack_lib::{card::Card, card::CardEnvelope, query, repository::{get_repo_root, load_all_cards}};
 use clap::{Parser, Subcommand};
-use std::fs;
-use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
+use std::path::{PathBuf};
 
 #[derive(Parser)]
 #[command(name = "scout")]
@@ -48,55 +46,6 @@ enum Commands {
         #[arg(long, default_value = "10")]
         depth: u32,
     },
-}
-
-fn find_repo_root(start: &Path) -> Option<PathBuf> {
-    let mut current = start.to_path_buf();
-    loop {
-        let cardstack_dir = current.join(".cardstack");
-        if cardstack_dir.exists() && cardstack_dir.is_dir() {
-            return Some(current);
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-    None
-}
-
-fn get_repo_root(repo_override: Option<PathBuf>) -> Result<PathBuf> {
-    if let Some(repo) = repo_override {
-        if repo.join(".cardstack").exists() {
-            return Ok(repo);
-        }
-        anyhow::bail!("Not a cardstack repository: {:?}", repo);
-    }
-    
-    let cwd = std::env::current_dir()?;
-    find_repo_root(&cwd)
-        .context("Not in a cardstack repository. Run 'scribe init' first.")
-}
-
-fn load_all_cards(repo: &Path) -> Result<Vec<(PathBuf, Card)>> {
-    let cards_dir = repo.join("cards");
-    if !cards_dir.exists() {
-        return Ok(Vec::new());
-    }
-    
-    let mut cards = Vec::new();
-    for entry in WalkDir::new(&cards_dir) {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Ok((card, _)) = serialize::parse_card_file(&content) {
-                    cards.push((path.to_path_buf(), card));
-                }
-            }
-        }
-    }
-    
-    Ok(cards)
 }
 
 fn matches_filter(card: &Card, predicate: &str) -> bool {

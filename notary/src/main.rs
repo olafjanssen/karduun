@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
-use cardstack_lib::{card::Card, query, serialize};
+use cardstack_lib::{card::{Card, CardEnvelope}, query};
 use clap::{Parser, Subcommand};
 use std::fs;
+use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 #[derive(Parser)]
 #[command(name = "notary")]
@@ -17,6 +17,9 @@ struct Cli {
     
     #[arg(long, global = true)]
     jsonl: bool,
+    
+    #[arg(long, global = true)]
+    jsonl_in: bool,
     
     #[arg(long, global = true)]
     key: Option<PathBuf>,
@@ -52,48 +55,27 @@ enum Commands {
     },
 }
 
-fn find_repo_root(start: &Path) -> Option<PathBuf> {
-    let mut current = start.to_path_buf();
-    loop {
-        let cardstack_dir = current.join(".cardstack");
-        if cardstack_dir.exists() && cardstack_dir.is_dir() {
-            return Some(current);
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-    None
-}
+// Use shared repository functions from cardstack-lib
+use cardstack_lib::repository::{get_repo_root, load_all_cards, load_card, save_card};
 
-fn get_repo_root(repo_override: Option<PathBuf>) -> Result<PathBuf> {
-    if let Some(repo) = repo_override {
-        if repo.join(".cardstack").exists() {
-            return Ok(repo);
-        }
-        anyhow::bail!("Not a cardstack repository: {:?}", repo);
-    }
-    
-    let cwd = std::env::current_dir()?;
-    find_repo_root(&cwd)
-        .context("Not in a cardstack repository. Run 'scribe init' first.")
-}
-
-fn load_all_cards(repo: &Path) -> Result<Vec<Card>> {
-    let cards_dir = repo.join("cards");
-    if !cards_dir.exists() {
-        return Ok(Vec::new());
-    }
-    
+fn load_cards_from_jsonl(repo: &Path) -> Result<Vec<Card>> {
+    // Read CardEnvelopes from stdin, load full cards from repo
+    let stdin = io::stdin();
+    let reader = stdin.lock();
     let mut cards = Vec::new();
-    for entry in WalkDir::new(&cards_dir) {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Ok((card, _)) = serialize::parse_card_file(&content) {
-                    cards.push(card);
-                }
+    
+    for line in reader.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        
+        let envelope: CardEnvelope = serde_json::from_str(&line)?;
+        // Load full card from repository using UID
+        match load_card(repo, &envelope.uid) {
+            Ok(card) => cards.push(card),
+            Err(e) => {
+                eprintln!("Warning: Could not load card {}: {}", envelope.uid, e);
             }
         }
     }
@@ -185,46 +167,7 @@ fn execute_query(cards: Vec<Card>, q: Option<&query::Query>) -> Vec<Card> {
     results
 }
 
-fn load_card(repo: &Path, identifier: &str) -> Result<Card> {
-    let cards_dir = repo.join("cards");
-    if !cards_dir.exists() {
-        anyhow::bail!("Cards directory not found");
-    }
-    
-    for entry in WalkDir::new(&cards_dir) {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Ok((card, _)) = serialize::parse_card_file(&content) {
-                    if card.uid == identifier || card.slug == identifier {
-                        return Ok(card);
-                    }
-                }
-            }
-        }
-    }
-    
-    anyhow::bail!("Card not found: {}", identifier)
-}
-
-fn save_card(repo: &Path, card: &mut Card) -> Result<PathBuf> {
-    card.updated = chrono::Utc::now();
-    card.version += 1;
-    
-    let year = card.created.format("%Y").to_string();
-    let month = card.created.format("%m").to_string();
-    let dir = repo.join("cards").join(&year).join(&month);
-    fs::create_dir_all(&dir)?;
-    
-    let filename = format!("{}--{}.yaml", card.uid, card.slug);
-    let file_path = dir.join(&filename);
-    
-    let content = serialize::write_card_file(card)?;
-    fs::write(&file_path, content)?;
-    
-    Ok(file_path)
-}
+// load_card and save_card are now imported from cardstack_lib::repository
 
 fn compute_card_hash(card: &Card) -> Result<String> {
     // Serialize card to canonical form for hashing
@@ -421,15 +364,19 @@ fn main() -> Result<()> {
                 .trim()
                 .to_string();
             
-            let cards_to_sign: Vec<Card> = if let Some(uid_str) = uid {
+            let cards_to_sign: Vec<Card> = if cli.jsonl_in {
+                // Read from JSONL stdin
+                load_cards_from_jsonl(&repo)?
+            } else if let Some(uid_str) = uid {
                 vec![load_card(&repo, uid_str)?]
             } else if let Some(q) = query {
                 // Parse and execute full query DSL
-                let all_cards = load_all_cards(&repo)?;
+                let all_cards_with_paths = load_all_cards(&repo)?;
+                let all_cards: Vec<Card> = all_cards_with_paths.into_iter().map(|(_, card)| card).collect();
                 let parsed_query = query::parse_query_shorthand(q)?;
                 execute_query(all_cards, Some(&parsed_query))
             } else {
-                anyhow::bail!("Either --uid or --query required");
+                anyhow::bail!("Either --uid, --query, or --jsonl-in required");
             };
             
             let mut signed_count = 0;
@@ -462,7 +409,11 @@ fn main() -> Result<()> {
                 save_card(&repo, &mut card)?;
                 signed_count += 1;
                 
-                if !cli.jsonl {
+                if cli.jsonl {
+                    // Output signed card as JSONL CardEnvelope
+                    let envelope = CardEnvelope::from(card.clone());
+                    println!("{}", serde_json::to_string(&envelope)?);
+                } else {
                     println!("Signed: {} ({})", card.title, card.uid);
                 }
             }
@@ -478,15 +429,19 @@ fn main() -> Result<()> {
                 None
             };
             
-            let cards_to_verify: Vec<Card> = if let Some(uid_str) = uid {
+            let cards_to_verify: Vec<Card> = if cli.jsonl_in {
+                // Read from JSONL stdin
+                load_cards_from_jsonl(&repo)?
+            } else if let Some(uid_str) = uid {
                 vec![load_card(&repo, uid_str)?]
             } else if let Some(q) = query {
                 // Parse and execute full query DSL
-                let all_cards = load_all_cards(&repo)?;
+                let all_cards_with_paths = load_all_cards(&repo)?;
+                let all_cards: Vec<Card> = all_cards_with_paths.into_iter().map(|(_, card)| card).collect();
                 let parsed_query = query::parse_query_shorthand(q)?;
                 execute_query(all_cards, Some(&parsed_query))
             } else {
-                anyhow::bail!("Either --uid or --query required");
+                anyhow::bail!("Either --uid, --query, or --jsonl-in required");
             };
             
             let mut results = Vec::new();
