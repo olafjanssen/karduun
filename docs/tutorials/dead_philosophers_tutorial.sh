@@ -4,11 +4,18 @@
 # This script demonstrates how to use the Karduun CLI suite to create cards
 # and a dynamic deck for "Dead Philosophers" using a REPL-friendly, Bash-first workflow.
 #
+# The tutorial covers:
+#   - Core tools: scribe, scout, catalog
+#   - Extended features: stencil (templates), curator (organization), porter (export)
+#
 # Usage:
 #   ./dead_philosophers_tutorial.sh
 #
 # Or run with a custom workspace directory:
 #   WORKDIR=my-philosophers ./dead_philosophers_tutorial.sh
+#
+# Note: Extended features (stencil, curator, porter) are optional and will be
+# skipped if the tools are not installed.
 
 set -euo pipefail
 
@@ -50,26 +57,47 @@ echo_section "Step 1: Verifying Karduun Tools Installation"
 
 echo_info "Checking if Karduun tools are installed..."
 
-TOOLS=("scribe" "scout" "catalog" "gauge")
-MISSING_TOOLS=()
+# Core tools (required for basic tutorial)
+CORE_TOOLS=("scribe" "scout" "catalog")
+# Optional tools (for extended tutorial)
+OPTIONAL_TOOLS=("gauge" "curator" "porter" "stencil")
 
-for tool in "${TOOLS[@]}"; do
+MISSING_CORE=()
+MISSING_OPTIONAL=()
+
+for tool in "${CORE_TOOLS[@]}"; do
     if command -v "$tool" &> /dev/null; then
         echo_success "$tool is installed: $($tool --version 2>/dev/null || $tool --help | head -1)"
     else
         echo_warn "$tool is not found in PATH"
-        MISSING_TOOLS+=("$tool")
+        MISSING_CORE+=("$tool")
     fi
 done
 
-if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
-    echo_error "Some tools are missing. Please install them first:"
-    echo "  cargo install --path ${MISSING_TOOLS[*]}"
+for tool in "${OPTIONAL_TOOLS[@]}"; do
+    if command -v "$tool" &> /dev/null; then
+        echo_success "$tool is installed: $($tool --version 2>/dev/null || $tool --help | head -1)"
+    else
+        echo_warn "$tool (optional) is not found in PATH"
+        MISSING_OPTIONAL+=("$tool")
+    fi
+done
+
+if [ ${#MISSING_CORE[@]} -gt 0 ]; then
+    echo_error "Core tools are missing. Please install them first:"
+    echo "  cargo install --path ${MISSING_CORE[*]}"
     echo ""
     echo "Or build from the repo root:"
     echo "  cargo build --release"
     echo ""
     read -p "Press Enter to continue anyway, or Ctrl+C to exit..."
+fi
+
+if [ ${#MISSING_OPTIONAL[@]} -gt 0 ]; then
+    echo_warn "Optional tools missing: ${MISSING_OPTIONAL[*]}"
+    echo "  These will be skipped in the tutorial. Install with:"
+    echo "  cargo install --path ${MISSING_OPTIONAL[*]}"
+    echo ""
 fi
 
 # ============================================================================
@@ -286,6 +314,120 @@ echo "  - Search content: scout grep \"your search term\""
 echo "  - Show specific card: scribe show socrates"
 echo "  - Create links: scribe link card1 --to card2 --type cites"
 echo "  - Query by school: scout list --query \"tag:philosopher fields.school=Existentialism\""
+echo ""
+echo_info "Repository location: $(pwd)"
+echo ""
+
+# ============================================================================
+# STEP 8: Create Template with Stencil
+# ============================================================================
+echo_section "Step 8: Creating Template with Stencil"
+
+if command -v stencil &> /dev/null; then
+    echo_info "Creating a template for philosopher cards..."
+    
+    # Create a philosopher template with constraints
+    stencil new "Philosopher Template" \
+      --slug template-philosopher \
+      --required-field "fields.status" \
+      --required-field "fields.birth" \
+      --required-field "fields.death" \
+      --required-field "fields.nationality" \
+      --required-field "fields.school" \
+      --enum-field "fields.status=deceased,alive" \
+      --frozen-field "fields.birth" \
+      --frozen-field "fields.death" || echo_warn "Template creation failed (may already exist)"
+    
+    echo_success "Template created (if not already present)"
+    
+    echo ""
+    echo_info "Listing all templates:"
+    stencil list || echo_warn "stencil list failed"
+    
+    echo ""
+    echo_info "Showing template details:"
+    stencil show template-philosopher || echo_warn "Could not show template"
+else
+    echo_warn "stencil tool not available, skipping template creation"
+fi
+
+# ============================================================================
+# STEP 9: Organization with Curator
+# ============================================================================
+echo_section "Step 9: Organization Analysis with Curator"
+
+if command -v curator &> /dev/null && command -v gauge &> /dev/null; then
+    echo_info "Analyzing philosophers and creating organization plan..."
+    echo_info "(This will show what curator would suggest for improvements)"
+    
+    # Create a plan (dry-run by default)
+    echo_info "Creating organization plan from analysis..."
+    scout list --query "tag:philosopher status=deceased" --jsonl | \
+      gauge analyze --jsonl | \
+      curator plan 2>/dev/null | head -n 3 || echo_warn "curator plan failed or no actions needed"
+    
+    echo ""
+    echo_info "Note: You can apply changes with:"
+    echo "  scout list --query 'tag:philosopher' --jsonl | gauge analyze --jsonl | curator plan | curator apply --yes"
+else
+    echo_warn "curator or gauge tools not available, skipping organization analysis"
+fi
+
+# ============================================================================
+# STEP 10: Export with Porter
+# ============================================================================
+echo_section "Step 10: Exporting Cards with Porter"
+
+if command -v porter &> /dev/null; then
+    EXPORT_DIR="philosophers-export"
+    mkdir -p "$EXPORT_DIR"
+    
+    echo_info "Exporting philosopher cards to JSONL format..."
+    porter export --format jsonl --out "$EXPORT_DIR" --query "tag:philosopher" 2>/dev/null || \
+      echo_warn "porter export failed (may need different query format)"
+    
+    echo ""
+    echo_info "Exporting to Markdown format..."
+    porter export --format md --out "$EXPORT_DIR/markdown" --query "tag:philosopher" 2>/dev/null || \
+      echo_warn "porter export to markdown failed"
+    
+    if [ -d "$EXPORT_DIR" ]; then
+        echo ""
+        echo_success "Exports created in: $EXPORT_DIR"
+        echo_info "Files:"
+        ls -lh "$EXPORT_DIR" | head -5 || true
+    fi
+else
+    echo_warn "porter tool not available, skipping export"
+fi
+
+# ============================================================================
+# FINAL SUMMARY
+# ============================================================================
+echo_section "Tutorial Complete - Extended Features!"
+
+echo_success "Completed all extended tutorial steps!"
+echo ""
+echo_info "Summary of what we did:"
+echo "  ✓ Created 8 philosopher cards"
+echo "  ✓ Built catalog index"
+echo "  ✓ Created dynamic deck 'Dead Philosophers'"
+if command -v stencil &> /dev/null; then
+    echo "  ✓ Created philosopher template"
+fi
+if command -v curator &> /dev/null; then
+    echo "  ✓ Analyzed organization opportunities"
+fi
+if command -v porter &> /dev/null; then
+    echo "  ✓ Exported cards to multiple formats"
+fi
+echo ""
+echo_info "Next steps you can try:"
+echo "  - Create cards from template: scribe new 'Philosopher Name' --template template-philosopher"
+echo "  - Validate template compliance: stencil validate --query 'tag:philosopher'"
+echo "  - Import exported cards: porter import --from jsonl --in philosophers-export"
+echo "  - Apply organization suggestions: scout list --jsonl | gauge analyze --jsonl | curator plan | curator apply --yes"
+echo "  - Create static snapshot: scribe deck snapshot dead-philosophers --out dead-philosophers-2025"
 echo ""
 echo_info "Repository location: $(pwd)"
 echo ""
