@@ -266,8 +266,8 @@ scribe deck new "Dead Philosophers" --mode query --query "tag:philosopher status
 echo_success "Deck 'Dead Philosophers' created"
 
 echo ""
-echo_info "Verifying deck contents:"
-scout list --query "tag:philosopher status=deceased" --sort "title"
+echo_info "Showing deck contents and metadata:"
+scribe deck show dead-philosophers || scribe deck show "Dead Philosophers" || echo_warn "Could not show deck"
 
 # ============================================================================
 # STEP 6: Explore Deck Structure
@@ -281,6 +281,17 @@ elif scout tree "Dead Philosophers" &> /dev/null; then
     scout tree "Dead Philosophers"
 else
     echo_warn "Could not display tree. This may be normal for query-based decks."
+fi
+
+echo ""
+echo_info "Showing backlinks to verify deck membership (cards that link to the deck):"
+if scout backlinks dead-philosophers &> /dev/null; then
+    scout backlinks dead-philosophers
+elif scout backlinks "Dead Philosophers" &> /dev/null; then
+    scout backlinks "Dead Philosophers"
+else
+    echo_info "Note: For query-based decks, membership is determined by the query, not explicit links."
+    echo_info "The cards shown above are the current members matching the query."
 fi
 
 # ============================================================================

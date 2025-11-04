@@ -249,6 +249,42 @@ scribe deck:new "Open Drafts" --mode query --query "status=draft tag:design"
 scribe deck:new "My Collection" --mode hybrid --query "tag:favorite"
 ```
 
+### `scribe deck:show`
+
+Display deck contents and metadata.
+
+**Usage:**
+```bash
+scribe deck show <deck>
+```
+
+**What it shows:**
+- Deck title and UID
+- Deck mode (static, query, or hybrid)
+- Query string (for query-based decks)
+- List of members with their UIDs and titles
+
+**Examples:**
+```bash
+# Show deck contents
+scribe deck show my-deck
+
+# For query-based decks, shows the query and current members
+scribe deck show dead-philosophers
+```
+
+**Output:**
+```
+Deck: Dead Philosophers (ulid_01ABC...)
+Mode: Query
+Query: tag:philosopher status=deceased
+
+Members (8):
+  ulid_01DEF... - Socrates
+  ulid_01GHI... - Plato
+  ...
+```
+
 ### `scribe deck:add`
 
 Add cards to a static deck.
