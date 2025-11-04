@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use cardstack_lib::{card::Card, serialize};
+use cardstack_lib::{card::Card, query, serialize};
 use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -99,6 +99,90 @@ fn load_all_cards(repo: &Path) -> Result<Vec<Card>> {
     }
     
     Ok(cards)
+}
+
+fn matches_filter(card: &Card, predicate: &str) -> bool {
+    // Simple predicate matching (same as scout)
+    if predicate.contains("tags contains") {
+        if let Some(tag) = predicate.split('"').nth(1) {
+            return card.tags.contains(&tag.to_string());
+        }
+    } else if predicate.starts_with("fields.") && predicate.contains(" = ") {
+        let parts: Vec<&str> = predicate.split(" = ").collect();
+        if parts.len() == 2 {
+            let field = parts[0].strip_prefix("fields.").unwrap_or(parts[0]);
+            let value = parts[1].trim_matches('"');
+            if let Some(field_val) = card.fields.get(field) {
+                return field_val.as_str().map(|s| s == value).unwrap_or(false);
+            }
+        }
+    } else if predicate == "has:collection" {
+        return card.has_collection();
+    } else if predicate == "has:template" {
+        return card.has_template();
+    }
+    
+    false
+}
+
+fn execute_query(cards: Vec<Card>, q: Option<&query::Query>) -> Vec<Card> {
+    let mut results = cards;
+    
+    if let Some(query) = q {
+        // Apply filter
+        if let Some(ref filter) = query.filter {
+            match filter {
+                query::Filter::All(preds) => {
+                    results.retain(|card| {
+                        preds.iter().all(|p| matches_filter(card, p))
+                    });
+                }
+                query::Filter::Any(preds) => {
+                    results.retain(|card| {
+                        preds.iter().any(|p| matches_filter(card, p))
+                    });
+                }
+                query::Filter::None(preds) => {
+                    results.retain(|card| {
+                        !preds.iter().any(|p| matches_filter(card, p))
+                    });
+                }
+            }
+        }
+        
+        // Apply sort (not critical for signing, but good for consistency)
+        if !query.sort.is_empty() {
+            results.sort_by(|a, b| {
+                for sort_key in &query.sort {
+                    let descending = sort_key.starts_with('-');
+                    let key = if descending {
+                        &sort_key[1..]
+                    } else {
+                        sort_key.as_str()
+                    };
+                    
+                    let cmp = match key {
+                        "updated" => a.updated.cmp(&b.updated),
+                        "created" => a.created.cmp(&b.created),
+                        "title" => a.title.cmp(&b.title),
+                        _ => std::cmp::Ordering::Equal,
+                    };
+                    
+                    if cmp != std::cmp::Ordering::Equal {
+                        return if descending { cmp.reverse() } else { cmp };
+                    }
+                }
+                a.uid.cmp(&b.uid)
+            });
+        }
+        
+        // Apply limit
+        if let Some(limit) = query.limit {
+            results.truncate(limit as usize);
+        }
+    }
+    
+    results
 }
 
 fn load_card(repo: &Path, identifier: &str) -> Result<Card> {
@@ -233,16 +317,10 @@ fn main() -> Result<()> {
             let cards_to_sign: Vec<Card> = if let Some(uid_str) = uid {
                 vec![load_card(&repo, uid_str)?]
             } else if let Some(q) = query {
-                // Simple tag filtering for now
+                // Parse and execute full query DSL
                 let all_cards = load_all_cards(&repo)?;
-                if q.starts_with("tag:") {
-                    let tag = q.strip_prefix("tag:").unwrap();
-                    all_cards.into_iter()
-                        .filter(|c| c.tags.contains(&tag.to_string()))
-                        .collect()
-                } else {
-                    all_cards
-                }
+                let parsed_query = query::parse_query_shorthand(q)?;
+                execute_query(all_cards, Some(&parsed_query))
             } else {
                 anyhow::bail!("Either --uid or --query required");
             };
@@ -290,15 +368,10 @@ fn main() -> Result<()> {
             let cards_to_verify: Vec<Card> = if let Some(uid_str) = uid {
                 vec![load_card(&repo, uid_str)?]
             } else if let Some(q) = query {
+                // Parse and execute full query DSL
                 let all_cards = load_all_cards(&repo)?;
-                if q.starts_with("tag:") {
-                    let tag = q.strip_prefix("tag:").unwrap();
-                    all_cards.into_iter()
-                        .filter(|c| c.tags.contains(&tag.to_string()))
-                        .collect()
-                } else {
-                    all_cards
-                }
+                let parsed_query = query::parse_query_shorthand(q)?;
+                execute_query(all_cards, Some(&parsed_query))
             } else {
                 anyhow::bail!("Either --uid or --query required");
             };

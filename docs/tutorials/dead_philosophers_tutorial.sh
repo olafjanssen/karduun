@@ -6,7 +6,7 @@
 #
 # The tutorial covers:
 #   - Core tools: scribe, scout, catalog
-#   - Extended features: stencil (templates), curator (organization), porter (export)
+#   - Extended features: stencil (templates), curator (organization), notary (signing), porter (export)
 #
 # Usage:
 #   ./dead_philosophers_tutorial.sh
@@ -60,7 +60,7 @@ echo_info "Checking if Karduun tools are installed..."
 # Core tools (required for basic tutorial)
 CORE_TOOLS=("scribe" "scout" "catalog")
 # Optional tools (for extended tutorial)
-OPTIONAL_TOOLS=("gauge" "curator" "porter" "stencil")
+OPTIONAL_TOOLS=("gauge" "curator" "porter" "stencil" "notary")
 
 MISSING_CORE=()
 MISSING_OPTIONAL=()
@@ -385,9 +385,46 @@ else
 fi
 
 # ============================================================================
-# STEP 10: Export with Porter
+# STEP 10: Signing with Notary
 # ============================================================================
-echo_section "Step 10: Exporting Cards with Porter"
+echo_section "Step 10: Signing Cards with Notary"
+
+if command -v notary &> /dev/null; then
+    echo_info "Notary provides cryptographic signing and verification for cards..."
+    
+    # Generate a key pair (in a safe location)
+    KEY_DIR=".keys"
+    mkdir -p "$KEY_DIR"
+    
+    echo_info "Generating signing key pair..."
+    notary generate-key --out "$KEY_DIR" 2>/dev/null || echo_warn "Key generation failed (may already exist)"
+    
+    if [ -f "$KEY_DIR/secret.key" ]; then
+        echo_success "Key pair generated in $KEY_DIR/"
+        
+        echo ""
+        echo_info "Signing philosopher cards..."
+        notary sign --query "tag:philosopher status=deceased" --key "$KEY_DIR/secret.key" 2>/dev/null || \
+          echo_warn "Signing failed (may need different query or key format)"
+        
+        echo ""
+        echo_info "Verifying signatures..."
+        notary verify --query "tag:philosopher status=deceased" --key "$KEY_DIR/public.key" 2>/dev/null || \
+          echo_warn "Verification failed or no signatures found"
+        
+        echo ""
+        echo_info "Note: Keep $KEY_DIR/secret.key secure and never commit it to git!"
+    else
+        echo_warn "Key generation failed, skipping signing demonstration"
+    fi
+else
+    echo_warn "notary tool not available, skipping signing"
+fi
+
+# ============================================================================
+# STEP 11: Export with Porter
+# ============================================================================
+echo_section "Step 11: Exporting Cards with Porter"
 
 if command -v porter &> /dev/null; then
     EXPORT_DIR="philosophers-export"
@@ -429,6 +466,9 @@ fi
 if command -v curator &> /dev/null; then
     echo "  ✓ Analyzed organization opportunities"
 fi
+if command -v notary &> /dev/null; then
+    echo "  ✓ Signed and verified cards cryptographically"
+fi
 if command -v porter &> /dev/null; then
     echo "  ✓ Exported cards to multiple formats"
 fi
@@ -436,6 +476,8 @@ echo ""
 echo_info "Next steps you can try:"
 echo "  - Create cards from template: scribe new 'Philosopher Name' --template template-philosopher"
 echo "  - Validate template compliance: stencil validate --query 'tag:philosopher'"
+echo "  - Sign new cards: notary sign --query 'tag:philosopher' --key .keys/secret.key"
+echo "  - Verify signatures: notary verify --query 'tag:philosopher' --key .keys/public.key"
 echo "  - Import exported cards: porter import --from jsonl --in philosophers-export"
 echo "  - Apply organization suggestions: scout list --jsonl | gauge analyze --jsonl | curator plan | curator apply --yes"
 echo "  - Create static snapshot: scribe deck snapshot dead-philosophers --out dead-philosophers-2025"
