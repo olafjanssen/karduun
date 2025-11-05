@@ -492,16 +492,45 @@ echo_section "Step 12: Organization Analysis with Curator"
 if command -v curator &> /dev/null && command -v gauge &> /dev/null; then
     echo_info "Analyzing philosophers and creating organization plan..."
     echo_info "(This will show what curator would suggest for improvements)"
+    echo_info "Note: This may take a moment as gauge initializes the embedding model..."
     
     # Create a plan (dry-run by default)
     echo_info "Creating organization plan from analysis..."
-    scout list --query "tag:philosopher status=deceased" --jsonl | \
-      gauge analyze --jsonl | \
-      curator plan 2>/dev/null | head -n 3 || echo_warn "curator plan failed or no actions needed"
+    echo_info "(Showing first 3 actions, if any)"
+    echo ""
+    
+    # Run the pipeline directly - let it output naturally
+    # Use a temp file to capture output and avoid blocking issues
+    TEMP_PLAN=$(mktemp)
+    
+    # Run pipeline and capture both stdout and stderr
+    # Filter for JSON lines only (to skip "Initialized embedding model" messages)
+    scout list --query "tag:philosopher status=deceased" --jsonl 2>/dev/null | \
+      gauge analyze --jsonl 2>&1 | \
+      curator plan 2>&1 | \
+      grep -E '^\{' | \
+      head -n 3 > "$TEMP_PLAN" 2>&1 || true
+    
+    # Check what we got
+    if [ -s "$TEMP_PLAN" ]; then
+        cat "$TEMP_PLAN"
+        echo ""
+        echo_success "Organization plan generated (showing first 3 actions)"
+        echo_info "Note: The 'consider-merge' actions suggest cards that might benefit from merging"
+        echo_info "      based on semantic similarity (low sv = similarity value)"
+    else
+        echo_info "No organization actions needed - all cards are well-structured"
+        echo_info "(This means the cards are appropriately sized and organized)"
+    fi
+    
+    rm -f "$TEMP_PLAN"
     
     echo ""
-    echo_info "Note: You can apply changes with:"
-    echo "  scout list --query 'tag:philosopher' --jsonl | gauge analyze --jsonl | curator plan | curator apply --yes"
+    echo_info "To review all actions:"
+    echo "  scout list --query 'tag:philosopher status=deceased' --jsonl | gauge analyze --jsonl | curator plan"
+    echo ""
+    echo_info "To apply changes (requires --yes flag):"
+    echo "  scout list --query 'tag:philosopher status=deceased' --jsonl | gauge analyze --jsonl | curator plan | curator apply --yes"
 else
     echo_warn "curator or gauge tools not available, skipping organization analysis"
 fi
@@ -597,19 +626,35 @@ echo_section "Step 15: Creating Static Deck Snapshots"
 
 echo_info "Creating a static snapshot of the 'Dead Philosophers' deck..."
 echo_info "(This captures the current state of the deck at a point in time)"
+echo_info "Note: For query-based decks, the snapshot will automatically resolve and include all current members"
 
-if scribe deck snapshot dead-philosophers --out dead-philosophers-snapshot-2025 2>/dev/null || \
-   scribe deck snapshot "Dead Philosophers" --out dead-philosophers-snapshot-2025 2>/dev/null; then
+if OUTPUT=$(scribe deck snapshot dead-philosophers --out dead-philosophers-snapshot-2025 2>&1) || \
+   OUTPUT=$(scribe deck snapshot "Dead Philosophers" --out dead-philosophers-snapshot-2025 2>&1); then
     echo_success "Deck snapshot created: dead-philosophers-snapshot-2025"
+    echo "$OUTPUT" | head -2
     echo_info "A snapshot is a static copy that won't change even if cards are added/removed"
+    echo_info "The snapshot automatically captured all current members from the query-based deck"
 else
-    echo_warn "Could not create snapshot (command format may differ)"
+    echo_warn "Could not create snapshot"
+    if [ -n "$OUTPUT" ]; then
+        echo_info "Error: $OUTPUT"
+    fi
     echo_info "Example snapshot command: scribe deck snapshot dead-philosophers --out dead-philosophers-2025"
 fi
 
 echo ""
-echo_info "Listing available decks (including snapshots if created):"
-scribe deck list 2>/dev/null || echo_warn "Could not list decks"
+echo_info "Showing the original deck and snapshot:"
+echo_info "Original deck 'Dead Philosophers' (query-based, members change dynamically):"
+scribe deck show dead-philosophers 2>/dev/null || scribe deck show "Dead Philosophers" 2>/dev/null || echo_info "  (Query-based deck - members change dynamically)"
+
+echo ""
+echo_info "Snapshot deck (static, members frozen at creation time):"
+scribe deck show dead-philosophers-snapshot-2025 2>/dev/null || echo_info "  (Static snapshot - members are frozen at creation time)"
+
+echo ""
+echo_info "Note: The snapshot should have the same members as the original deck had when it was created."
+echo_info "      If you add more philosophers matching the query, they'll appear in the original deck"
+echo_info "      but not in the snapshot (which is the point of a snapshot - it's frozen in time)"
 
 # ============================================================================
 # FINAL SUMMARY

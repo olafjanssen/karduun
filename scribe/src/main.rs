@@ -905,8 +905,6 @@ fn main() -> Result<()> {
                 DeckCommands::Snapshot { deck, out } => {
                     let deck_card = load_card(&repo, deck)?;
                     
-                    // TODO: Resolve query deck members if dynamic
-                    // For now, just create a static copy
                     let snapshot_uid = uid::generate_uid();
                     let snapshot_slug = out.clone();
                     
@@ -916,11 +914,214 @@ fn main() -> Result<()> {
                         snapshot_uid.clone(),
                     );
                     
+                    // Determine snapshot members based on deck mode
+                    let mut snapshot_members = Vec::new();
+                    
                     if let Some(facets) = &deck_card.facets {
                         if let Some(collection) = &facets.collection {
+                            match collection.mode {
+                                CollectionMode::Query | CollectionMode::Hybrid => {
+                                    // Resolve query deck members by executing the query
+                                    let all_cards: Vec<(PathBuf, Card)> = {
+                                        let cards_dir = repo.join("cards");
+                                        if !cards_dir.exists() {
+                                            Vec::new()
+                                        } else {
+                                            let mut cards = Vec::new();
+                                            for entry in walkdir::WalkDir::new(&cards_dir) {
+                                                let entry = entry?;
+                                                let path = entry.path();
+                                                if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("yaml") {
+                                                    if let Ok(content) = fs::read_to_string(path) {
+                                                        if let Ok((card, _)) = serialize::parse_card_file(&content) {
+                                                            cards.push((path.to_path_buf(), card));
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            cards
+                                        }
+                                    };
+                                    
+                                    // Parse and execute query
+                                    if let Some(query_json) = &collection.query {
+                                        let mut query_obj = cardstack_lib::query::Query {
+                                            filter: None,
+                                            sort: Vec::new(),
+                                            limit: None,
+                                        };
+                                        
+                                        if let Some(obj) = query_json.as_object() {
+                                            // Parse filter
+                                            if let Some(filter_val) = obj.get("filter") {
+                                                if let Some(filter_obj) = filter_val.as_object() {
+                                                    if let Some(op) = filter_obj.get("op").and_then(|v| v.as_str()) {
+                                                        if let Some(preds_val) = filter_obj.get("predicates").and_then(|v| v.as_array()) {
+                                                            let preds: Vec<String> = preds_val.iter()
+                                                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                                                .collect();
+                                                            query_obj.filter = match op {
+                                                                "all" => Some(cardstack_lib::query::Filter::All(preds)),
+                                                                "any" => Some(cardstack_lib::query::Filter::Any(preds)),
+                                                                "none" => Some(cardstack_lib::query::Filter::None(preds)),
+                                                                _ => None,
+                                                            };
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            
+                                            // Parse sort
+                                            if let Some(sort_val) = obj.get("sort").and_then(|v| v.as_array()) {
+                                                query_obj.sort = sort_val.iter()
+                                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                                    .collect();
+                                            }
+                                            
+                                            // Parse limit
+                                            if let Some(limit_val) = obj.get("limit").and_then(|v| v.as_u64()) {
+                                                query_obj.limit = Some(limit_val as u32);
+                                            }
+                                        }
+                                        
+                                        let query = query_obj;
+                                        
+                                        // Execute query - reuse the same matching logic
+                                        let mut results: Vec<Card> = all_cards.iter()
+                                            .map(|(_, card)| card.clone())
+                                            .collect();
+                                        
+                                        // Apply filter
+                                        if let Some(ref filter) = query.filter {
+                                            match filter {
+                                                cardstack_lib::query::Filter::All(preds) => {
+                                                    results.retain(|card| {
+                                                        preds.iter().all(|p| {
+                                                            if p.starts_with("tags contains") {
+                                                                if let Some(tag) = p.split('"').nth(1) {
+                                                                    return card.tags.contains(&tag.to_string());
+                                                                }
+                                                            }
+                                                            if p.starts_with("fields.") && p.contains(" = ") {
+                                                                let parts: Vec<&str> = p.split(" = ").collect();
+                                                                if parts.len() == 2 {
+                                                                    let field = parts[0].strip_prefix("fields.").unwrap_or(parts[0]);
+                                                                    let value = parts[1].trim_matches('"');
+                                                                    if let Some(field_val) = card.fields.get(field) {
+                                                                        if let Some(s) = field_val.as_str() {
+                                                                            return s == value;
+                                                                        }
+                                                                        if let Some(b) = field_val.as_bool() {
+                                                                            return value == if b { "true" } else { "false" };
+                                                                        }
+                                                                        if let Some(n) = field_val.as_i64() {
+                                                                            if let Ok(v) = value.parse::<i64>() {
+                                                                                return n == v;
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            false
+                                                        })
+                                                    });
+                                                }
+                                                cardstack_lib::query::Filter::Any(preds) => {
+                                                    results.retain(|card| {
+                                                        preds.iter().any(|p| {
+                                                            if p.starts_with("tags contains") {
+                                                                if let Some(tag) = p.split('"').nth(1) {
+                                                                    return card.tags.contains(&tag.to_string());
+                                                                }
+                                                            }
+                                                            if p.starts_with("fields.") && p.contains(" = ") {
+                                                                let parts: Vec<&str> = p.split(" = ").collect();
+                                                                if parts.len() == 2 {
+                                                                    let field = parts[0].strip_prefix("fields.").unwrap_or(parts[0]);
+                                                                    let value = parts[1].trim_matches('"');
+                                                                    if let Some(field_val) = card.fields.get(field) {
+                                                                        if let Some(s) = field_val.as_str() {
+                                                                            return s == value;
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            false
+                                                        })
+                                                    });
+                                                }
+                                                cardstack_lib::query::Filter::None(preds) => {
+                                                    results.retain(|card| {
+                                                        !preds.iter().any(|p| {
+                                                            if p.starts_with("tags contains") {
+                                                                if let Some(tag) = p.split('"').nth(1) {
+                                                                    return card.tags.contains(&tag.to_string());
+                                                                }
+                                                            }
+                                                            if p.starts_with("fields.") && p.contains(" = ") {
+                                                                let parts: Vec<&str> = p.split(" = ").collect();
+                                                                if parts.len() == 2 {
+                                                                    let field = parts[0].strip_prefix("fields.").unwrap_or(parts[0]);
+                                                                    let value = parts[1].trim_matches('"');
+                                                                    if let Some(field_val) = card.fields.get(field) {
+                                                                        if let Some(s) = field_val.as_str() {
+                                                                            return s == value;
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                            false
+                                                        })
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        
+                                        // Apply sort
+                                        if !query.sort.is_empty() {
+                                            results.sort_by(|a, b| {
+                                                for sort_key in &query.sort {
+                                                    let descending = sort_key.starts_with('-');
+                                                    let key = if descending {
+                                                        &sort_key[1..]
+                                                    } else {
+                                                        sort_key.as_str()
+                                                    };
+                                                    
+                                                    let cmp = match key {
+                                                        "updated" => a.updated.cmp(&b.updated),
+                                                        "created" => a.created.cmp(&b.created),
+                                                        "title" => a.title.cmp(&b.title),
+                                                        _ => std::cmp::Ordering::Equal,
+                                                    };
+                                                    
+                                                    if cmp != std::cmp::Ordering::Equal {
+                                                        return if descending { cmp.reverse() } else { cmp };
+                                                    }
+                                                }
+                                                a.uid.cmp(&b.uid)
+                                            });
+                                        }
+                                        
+                                        // Apply limit
+                                        if let Some(limit) = query.limit {
+                                            results.truncate(limit as usize);
+                                        }
+                                        
+                                        // Extract member UIDs
+                                        snapshot_members = results.iter().map(|card| card.uid.clone()).collect();
+                                    }
+                                }
+                                CollectionMode::Static => {
+                                    // For static decks, use existing members
+                                    snapshot_members = collection.members.clone();
+                                }
+                            }
+                            
+                            // Create snapshot collection with resolved members
                             let snapshot_collection = CollectionFacet {
                                 mode: CollectionMode::Static,
-                                members: collection.members.clone(),
+                                members: snapshot_members,
                                 query: None,
                                 view: collection.view.clone(),
                             };
