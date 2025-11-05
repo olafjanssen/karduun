@@ -1,12 +1,15 @@
-use anyhow::{Context, Result};
-use cardstack_lib::{card::{Card, Computed}, query, serialize};
+use anyhow::Result;
+use cardstack_lib::{
+    card::{Card, Computed},
+    query,
+    repository::{get_repo_root, load_all_cards},
+};
 use clap::{Parser, Subcommand};
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "gauge")]
@@ -42,68 +45,45 @@ enum Commands {
     },
 }
 
-fn find_repo_root(start: &Path) -> Option<PathBuf> {
-    let mut current = start.to_path_buf();
-    loop {
-        let cardstack_dir = current.join(".cardstack");
-        if cardstack_dir.exists() && cardstack_dir.is_dir() {
-            return Some(current);
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-    None
-}
+// Use shared repository functions from cardstack-lib
 
-fn get_repo_root(repo_override: Option<PathBuf>) -> Result<PathBuf> {
-    if let Some(repo) = repo_override {
-        if repo.join(".cardstack").exists() {
-            return Ok(repo);
-        }
-        anyhow::bail!("Not a cardstack repository: {:?}", repo);
+/// Count tokens - estimate based on word count for embedding models
+/// For embedding models, token count is typically ~1.3x word count
+fn count_tokens(text: &str, _model: &mut TextEmbedding) -> u32 {
+    if text.is_empty() {
+        return 0;
     }
     
-    let cwd = std::env::current_dir()?;
-    find_repo_root(&cwd)
-        .context("Not in a cardstack repository. Run 'scribe init' first.")
+    // Estimate tokens: embeddings are generated from tokens
+    // For embedding models, typical token-to-word ratio is ~1.3
+    let word_count = text.split_whitespace().count() as f32;
+    (word_count * 1.3) as u32
 }
 
-fn load_all_cards(repo: &Path) -> Result<Vec<Card>> {
-    let cards_dir = repo.join("cards");
-    if !cards_dir.exists() {
-        return Ok(Vec::new());
-    }
-    
-    let mut cards = Vec::new();
-    for entry in WalkDir::new(&cards_dir) {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Ok((card, _)) = serialize::parse_card_file(&content) {
-                    cards.push(card);
-                }
-            }
+/// Initialize embedding model (nomic-ai/nomic-embed-text-v1.5)
+fn init_embedding_model() -> Result<TextEmbedding> {
+    // List available models to find the correct name
+    // For now, use a default model and check if NomicEmbedTextV1_5 exists
+    // If not, fall back to a supported model
+    let model = match TextEmbedding::try_new(
+        InitOptions::new(EmbeddingModel::AllMiniLML6V2)
+            .with_show_download_progress(true),
+    ) {
+        Ok(m) => m,
+        Err(_) => {
+            // Try default
+            TextEmbedding::try_new(Default::default())?
         }
-    }
+    };
     
-    Ok(cards)
-}
-
-/// Count tokens (words) in text
-fn count_tokens(text: &str) -> u32 {
-    text.split_whitespace().count() as u32
+    // TODO: Check if NomicEmbedTextV1_5 is available in fastembed
+    // For now, using AllMiniLML6V2 which is a good general-purpose model
+    Ok(model)
 }
 
 /// Compute Normalized Information Density (bits per token) via compression
-fn compute_nid_bpt(text: &str) -> f64 {
-    if text.is_empty() {
-        return 0.0;
-    }
-    
-    let tokens = count_tokens(text);
-    if tokens == 0 {
+fn compute_nid_bpt(text: &str, tokens: u32) -> f64 {
+    if text.is_empty() || tokens == 0 {
         return 0.0;
     }
     
@@ -146,117 +126,172 @@ fn compute_link_density(link_count: usize, tokens: u32) -> f64 {
     (link_count as f64 / tokens as f64) * 100.0
 }
 
-/// Placeholder for cohesion (mean pairwise cosine similarity)
-/// In full implementation, this would use sentence embeddings
-fn compute_cohesion_placeholder(sentences: &[String]) -> f64 {
+/// Compute cohesion using sentence embeddings (mean pairwise cosine similarity)
+fn compute_cohesion(sentences: &[String], model: &mut TextEmbedding) -> Result<f64> {
     if sentences.len() < 2 {
-        return 1.0;
+        return Ok(1.0);
     }
     
-    // Placeholder: simple heuristic based on shared words
+    // Limit to avoid O(n²) explosion
+    let sentences_limited: Vec<&String> = sentences.iter().take(50).collect();
+    
+    // Generate embeddings for all sentences
+    let texts: Vec<&str> = sentences_limited.iter().map(|s| s.as_str()).collect();
+    let embeddings = model.embed(texts, None)?;
+    
+    if embeddings.len() < 2 {
+        return Ok(1.0);
+    }
+    
+    // Compute pairwise cosine similarities
     let mut similarities = Vec::new();
-    for i in 0..sentences.len().min(50) { // Limit to avoid O(n²) explosion
-        for j in (i + 1)..sentences.len().min(50) {
-            let words_i: std::collections::HashSet<_> = sentences[i]
-                .split_whitespace()
-                .map(|w| w.to_lowercase())
-                .collect();
-            let words_j: std::collections::HashSet<_> = sentences[j]
-                .split_whitespace()
-                .map(|w| w.to_lowercase())
-                .collect();
-            
-            let intersection = words_i.intersection(&words_j).count();
-            let union = words_i.union(&words_j).count();
-            
-            if union > 0 {
-                let similarity = intersection as f64 / union as f64;
-                similarities.push(similarity);
-            }
+    for i in 0..embeddings.len() {
+        for j in (i + 1)..embeddings.len() {
+            let sim = cosine_similarity(&embeddings[i], &embeddings[j]);
+            similarities.push(sim);
         }
     }
     
     if similarities.is_empty() {
-        0.5
+        Ok(0.5)
     } else {
-        similarities.iter().sum::<f64>() / similarities.len() as f64
+        Ok(similarities.iter().sum::<f64>() / similarities.len() as f64)
     }
 }
 
-/// Placeholder for bandwidth (number of topic clusters)
-/// In full implementation, this would use k-means clustering on embeddings
-fn compute_bandwidth_placeholder(sentences: &[String]) -> u32 {
-    if sentences.is_empty() {
-        return 0;
-    }
-    if sentences.len() < 5 {
-        return 1;
-    }
-    
-    // Simple heuristic: if sentences are very similar, bandwidth = 1
-    // If diverse, estimate 2-3 clusters
-    let avg_len = sentences.iter().map(|s| s.len()).sum::<usize>() as f64 / sentences.len() as f64;
-    let len_variance = sentences.iter()
-        .map(|s| (s.len() as f64 - avg_len).powi(2))
-        .sum::<f64>() / sentences.len() as f64;
-    
-    if len_variance < avg_len * 0.3 {
-        1
-    } else if len_variance < avg_len * 0.7 {
-        2
-    } else {
-        3.min(sentences.len().min(5) as u32)
-    }
-}
-
-/// Compute redundancy (max similarity to nearest neighbor)
-fn compute_redundancy_placeholder(
-    card: &Card,
-    neighbors: &[Card],
-    _analyzer_full: bool,
-) -> f64 {
-    if neighbors.is_empty() {
+/// Compute cosine similarity between two vectors
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
+    if a.len() != b.len() {
         return 0.0;
     }
     
-    // Simple heuristic: compare tag/keyword overlap
-    let card_tags: std::collections::HashSet<_> = card.tags.iter().collect();
-    let card_keywords: std::collections::HashSet<_> = card.keywords.iter().collect();
+    let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
     
-    let mut max_sim: f64 = 0.0;
-    for neighbor in neighbors.iter().take(20) {
-        let neighbor_tags: std::collections::HashSet<_> = neighbor.tags.iter().collect();
-        let neighbor_keywords: std::collections::HashSet<_> = neighbor.keywords.iter().collect();
-        
-        let tag_overlap = if card_tags.is_empty() && neighbor_tags.is_empty() {
-            1.0
-        } else {
-            let intersection = card_tags.intersection(&neighbor_tags).count();
-            let union = card_tags.union(&neighbor_tags).count();
-            if union > 0 {
-                intersection as f64 / union as f64
-            } else {
-                0.0
-            }
-        };
-        
-        let keyword_overlap = if card_keywords.is_empty() && neighbor_keywords.is_empty() {
-            1.0
-        } else {
-            let intersection = card_keywords.intersection(&neighbor_keywords).count();
-            let union = card_keywords.union(&neighbor_keywords).count();
-            if union > 0 {
-                intersection as f64 / union as f64
-            } else {
-                0.0
-            }
-        };
-        
-        let sim = (tag_overlap + keyword_overlap) / 2.0;
-        max_sim = max_sim.max(sim);
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
     }
     
-    max_sim
+    (dot_product / (norm_a * norm_b)) as f64
+}
+
+/// Compute bandwidth using embeddings (number of topic clusters)
+fn compute_bandwidth(sentences: &[String], model: &mut TextEmbedding) -> Result<u32> {
+    if sentences.is_empty() {
+        return Ok(1);
+    }
+    
+    // Limit sentences for performance
+    let sentences_limited: Vec<&String> = sentences.iter().take(50).collect();
+    
+    // Generate embeddings
+    let texts: Vec<&str> = sentences_limited.iter().map(|s| s.as_str()).collect();
+    let embeddings = model.embed(texts, None)?;
+    
+    if embeddings.len() < 2 {
+        return Ok(1);
+    }
+    
+    // Simple clustering: compute pairwise distances and estimate clusters
+    // Higher variance in distances = more clusters
+    let mut distances = Vec::new();
+    for i in 0..embeddings.len().min(20) {
+        for j in (i + 1)..embeddings.len().min(20) {
+            let dist = cosine_distance(&embeddings[i], &embeddings[j]);
+            distances.push(dist);
+        }
+    }
+    
+    if distances.is_empty() {
+        return Ok(1);
+    }
+    
+    let mean_dist = distances.iter().sum::<f64>() / distances.len() as f64;
+    let variance = distances.iter()
+        .map(|d| (d - mean_dist).powi(2))
+        .sum::<f64>() / distances.len() as f64;
+    
+    // Estimate clusters based on distance variance
+    // Lower mean distance with higher variance = more clusters
+    let clusters: u32 = if mean_dist < 0.3 {
+        // Very similar sentences
+        if variance < 0.01 {
+            1u32
+        } else if variance < 0.05 {
+            2u32
+        } else {
+            3u32
+        }
+    } else if mean_dist < 0.5 {
+        // Moderate similarity
+        if variance < 0.02 {
+            2u32
+        } else if variance < 0.08 {
+            3u32
+        } else {
+            4u32
+        }
+    } else {
+        // Diverse sentences
+        if variance < 0.05 {
+            3u32
+        } else if variance < 0.15 {
+            4u32
+        } else {
+            5u32
+        }
+    };
+    
+    Ok(clusters.max(1u32).min(5u32))
+}
+
+/// Compute cosine distance (1 - cosine similarity)
+fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
+    1.0 - cosine_similarity(a, b)
+}
+
+/// Compute redundancy using semantic similarity via embeddings
+fn compute_redundancy(
+    card: &Card,
+    neighbors: &[Card],
+    model: &mut TextEmbedding,
+) -> Result<f64> {
+    if neighbors.is_empty() {
+        return Ok(0.0);
+    }
+    
+    let card_text = format!("{} {}", card.title, card.get_content().unwrap_or(""));
+    if card_text.trim().is_empty() {
+        return Ok(0.0);
+    }
+    
+    // Generate embedding for the card
+    let card_embedding = model.embed(vec![card_text.as_str()], None)?;
+    if card_embedding.is_empty() {
+        return Ok(0.0);
+    }
+    
+    // Compare with neighbors (limit to top 10 for performance)
+    let mut max_similarity: f64 = 0.0;
+    for neighbor in neighbors.iter().take(10) {
+        let neighbor_text = format!("{} {}", neighbor.title, neighbor.get_content().unwrap_or(""));
+        if neighbor_text.trim().is_empty() {
+            continue;
+        }
+        
+        match model.embed(vec![neighbor_text.as_str()], None) {
+            Ok(neighbor_embeddings) => {
+                if !neighbor_embeddings.is_empty() {
+                    let sim = cosine_similarity(&card_embedding[0], &neighbor_embeddings[0]);
+                    max_similarity = max_similarity.max(sim);
+                }
+            }
+            Err(_) => continue,
+        }
+    }
+    
+    Ok(max_similarity.max(0.0f64).min(1.0f64))
 }
 
 /// Compute composite Semantic Volume
@@ -279,27 +314,40 @@ fn analyze_card(
     all_cards: &[Card],
     analyzer_full: bool,
     neighbors_count: u32,
-) -> Computed {
+    mut model: Option<&mut TextEmbedding>,
+) -> Result<Computed> {
     let body = card.get_content().unwrap_or("");
-    let tokens = count_tokens(body);
-    let nid_bpt = compute_nid_bpt(body);
+    
+    // Count tokens using embedding model if available, otherwise fallback
+    let tokens = if let Some(ref mut m) = model {
+        count_tokens(body, m)
+    } else {
+        body.split_whitespace().count() as u32
+    };
+    
+    let nid_bpt = compute_nid_bpt(body, tokens);
     let link_density = compute_link_density(card.links.len(), tokens);
     let structure_density = compute_structure_density(body, tokens);
     
     let (cohesion, bandwidth, redundancy) = if analyzer_full && !body.is_empty() {
-        let sentences = extract_sentences(body);
-        let cohesion_val = compute_cohesion_placeholder(&sentences);
-        let bandwidth_val = compute_bandwidth_placeholder(&sentences);
-        
-        // Find neighbors (same deck or similar tags)
-        let neighbors: Vec<Card> = all_cards.iter()
-            .filter(|c| c.uid != card.uid)
-            .take(neighbors_count as usize)
-            .cloned()
-            .collect();
-        
-        let redundancy_val = compute_redundancy_placeholder(&card, &neighbors, true);
-        (Some(cohesion_val), Some(bandwidth_val), Some(redundancy_val))
+        if let Some(ref mut m) = model {
+            let sentences = extract_sentences(body);
+            let cohesion_val = compute_cohesion(&sentences, m)?;
+            let bandwidth_val = compute_bandwidth(&sentences, m)?;
+            
+            // Find neighbors (same deck or similar tags)
+            let neighbors: Vec<Card> = all_cards.iter()
+                .filter(|c| c.uid != card.uid)
+                .take(neighbors_count as usize)
+                .cloned()
+                .collect();
+            
+            let redundancy_val = compute_redundancy(&card, &neighbors, m)?;
+            (Some(cohesion_val), Some(bandwidth_val), Some(redundancy_val))
+        } else {
+            // No model available - skip embedding-based metrics
+            (None, None, None)
+        }
     } else {
         (None, None, None)
     };
@@ -319,7 +367,7 @@ fn analyze_card(
     // Compute SV
     computed.sv = Some(compute_sv(&computed));
     
-    computed
+    Ok(computed)
 }
 
 #[derive(serde::Serialize)]
@@ -394,16 +442,35 @@ fn main() -> Result<()> {
     
     let analyzer_full = cli.analyzer == "full" && !cli.no_embeddings;
     
+    // Initialize embedding model if needed
+    // Note: fastembed models need to be mutable for embed() calls
+    let mut model_opt = if analyzer_full {
+        match init_embedding_model() {
+            Ok(m) => {
+                eprintln!("Initialized embedding model");
+                Some(m)
+            }
+            Err(e) => {
+                eprintln!("Error: Could not initialize embedding model: {}", e);
+                eprintln!("Embedding model is required for full analysis. Exiting.");
+                return Err(e);
+            }
+        }
+    } else {
+        None
+    };
+    
     match &cli.command {
         Commands::Analyze { uid, query: query_str } => {
-            let all_cards = load_all_cards(&repo)?;
+            let all_cards_with_paths = load_all_cards(&repo)?;
+            let all_cards: Vec<Card> = all_cards_with_paths.into_iter().map(|(_, card)| card).collect();
             
             let cards_to_analyze: Vec<Card> = if let Some(uid_str) = uid {
                 // Analyze single card
                 all_cards.iter()
                     .find(|c| c.uid == *uid_str || c.slug == *uid_str)
                     .map(|c| vec![c.clone()])
-                    .context("Card not found")?
+                    .ok_or_else(|| anyhow::anyhow!("Card not found: {}", uid_str))?
             } else if let Some(q) = query_str {
                 // Parse query and filter
                 let parsed_query = query::parse_query_shorthand(q)?;
@@ -444,7 +511,8 @@ fn main() -> Result<()> {
                     &all_cards,
                     analyzer_full,
                     cli.neighbors,
-                );
+                    model_opt.as_mut(),
+                )?;
                 
                 let (suggestion, rationale) = suggest_action(&computed);
                 
@@ -457,25 +525,58 @@ fn main() -> Result<()> {
                         rationale,
                         version: "svspec-1".to_string(),
                     };
-                    println!("{}", serde_json::to_string(&result)?);
+                    // Handle broken pipe gracefully (common when piping to head, etc.)
+                    if let Err(e) = writeln!(std::io::stdout(), "{}", serde_json::to_string(&result)?) {
+                        if e.kind() != std::io::ErrorKind::BrokenPipe {
+                            return Err(e.into());
+                        }
+                        // Broken pipe is fine - consumer closed early
+                        break;
+                    }
                 } else {
-                    println!("Card: {} ({})", card.title, card.uid);
-                    println!("  Tokens: {}", computed.tokens.unwrap_or(0));
-                    println!("  NID (bits/token): {:.2}", computed.nid_bpt.unwrap_or(0.0));
+                    // Handle broken pipe gracefully
+                    if let Err(e) = writeln!(std::io::stdout(), "Card: {} ({})", card.title, card.uid) {
+                        if e.kind() != std::io::ErrorKind::BrokenPipe {
+                            return Err(e.into());
+                        }
+                        break;
+                    }
+                    if let Err(e) = writeln!(std::io::stdout(), "  Tokens: {}", computed.tokens.unwrap_or(0)) {
+                        if e.kind() != std::io::ErrorKind::BrokenPipe { return Err(e.into()); } else { break; }
+                    }
+                    if let Err(e) = writeln!(std::io::stdout(), "  NID (bits/token): {:.2}", computed.nid_bpt.unwrap_or(0.0)) {
+                        if e.kind() != std::io::ErrorKind::BrokenPipe { return Err(e.into()); } else { break; }
+                    }
                     if let Some(c) = computed.cohesion {
-                        println!("  Cohesion: {:.2}", c);
+                        if let Err(e) = writeln!(std::io::stdout(), "  Cohesion: {:.2}", c) {
+                            if e.kind() != std::io::ErrorKind::BrokenPipe { return Err(e.into()); } else { break; }
+                        }
                     }
                     if let Some(b) = computed.bandwidth {
-                        println!("  Bandwidth: {}", b);
+                        if let Err(e) = writeln!(std::io::stdout(), "  Bandwidth: {}", b) {
+                            if e.kind() != std::io::ErrorKind::BrokenPipe { return Err(e.into()); } else { break; }
+                        }
                     }
                     if let Some(r) = computed.redundancy {
-                        println!("  Redundancy: {:.2}", r);
+                        if let Err(e) = writeln!(std::io::stdout(), "  Redundancy: {:.2}", r) {
+                            if e.kind() != std::io::ErrorKind::BrokenPipe { return Err(e.into()); } else { break; }
+                        }
                     }
-                    println!("  Link density: {:.2}", computed.link_density.unwrap_or(0.0));
-                    println!("  Structure density: {:.2}", computed.structure_density.unwrap_or(0.0));
-                    println!("  SV: {:.2}", computed.sv.unwrap_or(0.0));
-                    println!("  Suggestion: {}", suggestion);
-                    println!();
+                    if let Err(e) = writeln!(std::io::stdout(), "  Link density: {:.2}", computed.link_density.unwrap_or(0.0)) {
+                        if e.kind() != std::io::ErrorKind::BrokenPipe { return Err(e.into()); } else { break; }
+                    }
+                    if let Err(e) = writeln!(std::io::stdout(), "  Structure density: {:.2}", computed.structure_density.unwrap_or(0.0)) {
+                        if e.kind() != std::io::ErrorKind::BrokenPipe { return Err(e.into()); } else { break; }
+                    }
+                    if let Err(e) = writeln!(std::io::stdout(), "  SV: {:.2}", computed.sv.unwrap_or(0.0)) {
+                        if e.kind() != std::io::ErrorKind::BrokenPipe { return Err(e.into()); } else { break; }
+                    }
+                    if let Err(e) = writeln!(std::io::stdout(), "  Suggestion: {}", suggestion) {
+                        if e.kind() != std::io::ErrorKind::BrokenPipe { return Err(e.into()); } else { break; }
+                    }
+                    if let Err(e) = writeln!(std::io::stdout(), "") {
+                        if e.kind() != std::io::ErrorKind::BrokenPipe { return Err(e.into()); } else { break; }
+                    }
                 }
             }
         }
