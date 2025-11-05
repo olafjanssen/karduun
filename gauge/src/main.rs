@@ -47,17 +47,24 @@ enum Commands {
 
 // Use shared repository functions from cardstack-lib
 
-/// Count tokens - estimate based on word count for embedding models
-/// For embedding models, token count is typically ~1.3x word count
-fn count_tokens(text: &str, _model: &mut TextEmbedding) -> u32 {
+/// Count tokens using the model's tokenizer
+fn count_tokens(text: &str, model: &TextEmbedding) -> u32 {
     if text.is_empty() {
         return 0;
     }
     
-    // Estimate tokens: embeddings are generated from tokens
-    // For embedding models, typical token-to-word ratio is ~1.3
-    let word_count = text.split_whitespace().count() as f32;
-    (word_count * 1.3) as u32
+    // Use the tokenizer directly from the TextEmbedding model
+    // The tokenizer.encode() method returns an Encoding with get_ids() or len()
+    match model.tokenizer.encode(text, false) {
+        Ok(encoding) => {
+            // Get the actual token IDs and count them
+            encoding.get_ids().len() as u32
+        }
+        Err(_) => {
+            // Fallback to word count if tokenization fails
+            text.split_whitespace().count() as u32
+        }
+    }
 }
 
 /// Initialize embedding model (nomic-ai/nomic-embed-text-v1.5)
@@ -319,7 +326,8 @@ fn analyze_card(
     let body = card.get_content().unwrap_or("");
     
     // Count tokens using embedding model if available, otherwise fallback
-    let tokens = if let Some(ref mut m) = model {
+    let tokens = if let Some(ref m) = model {
+        // Use the tokenizer directly (immutable access)
         count_tokens(body, m)
     } else {
         body.split_whitespace().count() as u32
