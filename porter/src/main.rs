@@ -1,5 +1,8 @@
 use anyhow::{Context, Result};
-use cardstack_lib::{card::{Card, CardEnvelope}, serialize, uid};
+use cardstack_lib::{
+    card::{Card, CardEnvelope},
+    get_repo_root, load_all_cards, save_card, uid,
+};
 use clap::{Parser, Subcommand};
 use csv::{ReaderBuilder, WriterBuilder};
 use std::fs;
@@ -43,54 +46,6 @@ enum Commands {
     },
 }
 
-fn find_repo_root(start: &Path) -> Option<PathBuf> {
-    let mut current = start.to_path_buf();
-    loop {
-        let cardstack_dir = current.join(".cardstack");
-        if cardstack_dir.exists() && cardstack_dir.is_dir() {
-            return Some(current);
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-    None
-}
-
-fn get_repo_root(repo_override: Option<PathBuf>) -> Result<PathBuf> {
-    if let Some(repo) = repo_override {
-        if repo.join(".cardstack").exists() {
-            return Ok(repo);
-        }
-        anyhow::bail!("Not a cardstack repository: {:?}", repo);
-    }
-    
-    let cwd = std::env::current_dir()?;
-    find_repo_root(&cwd)
-        .context("Not in a cardstack repository. Run 'scribe init' first.")
-}
-
-fn load_all_cards(repo: &Path) -> Result<Vec<Card>> {
-    let cards_dir = repo.join("cards");
-    if !cards_dir.exists() {
-        return Ok(Vec::new());
-    }
-    
-    let mut cards = Vec::new();
-    for entry in WalkDir::new(&cards_dir) {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-            if let Ok(content) = fs::read_to_string(path) {
-                if let Ok((card, _)) = serialize::parse_card_file(&content) {
-                    cards.push(card);
-                }
-            }
-        }
-    }
-    
-    Ok(cards)
-}
 
 fn filter_cards(cards: Vec<Card>, query: Option<&str>) -> Result<Vec<Card>> {
     if let Some(q) = query {
@@ -109,25 +64,6 @@ fn filter_cards(cards: Vec<Card>, query: Option<&str>) -> Result<Vec<Card>> {
     }
 }
 
-fn save_card(repo: &Path, card: &mut Card) -> Result<PathBuf> {
-    card.updated = chrono::Utc::now();
-    if card.version == 0 {
-        card.version = 1;
-    }
-    
-    let year = card.created.format("%Y").to_string();
-    let month = card.created.format("%m").to_string();
-    let dir = repo.join("cards").join(&year).join(&month);
-    fs::create_dir_all(&dir)?;
-    
-    let filename = format!("{}--{}.yaml", card.uid, card.slug);
-    let file_path = dir.join(&filename);
-    
-    let content = serialize::write_card_file(card)?;
-    fs::write(&file_path, content)?;
-    
-    Ok(file_path)
-}
 
 fn export_jsonl(cards: Vec<Card>, output_dir: &Path, anonymize: bool) -> Result<()> {
     fs::create_dir_all(output_dir)?;
@@ -422,7 +358,8 @@ fn main() -> Result<()> {
     
     match &cli.command {
         Commands::Export { query, format, out } => {
-            let all_cards = load_all_cards(&repo)?;
+            let all_cards_with_paths = load_all_cards(&repo)?;
+            let all_cards: Vec<Card> = all_cards_with_paths.into_iter().map(|(_, card)| card).collect();
             let filtered = filter_cards(all_cards, query.as_deref())?;
             
             match format.as_str() {
