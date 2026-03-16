@@ -18,4 +18,6 @@ serde_yaml.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 walkdir.workspace = true
+crossterm = "0.27"
+ratatui = "0.26"
 

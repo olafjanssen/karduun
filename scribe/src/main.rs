@@ -1,3 +1,5 @@
+mod tui;
+
 use anyhow::Result;
 use cardstack_lib::{
     card::{Card, CardEnvelope, CollectionFacet, CollectionMode, Facets},
@@ -101,6 +103,8 @@ enum Commands {
         #[arg(long)]
         jsonl: bool,
     },
+    /// Launch interactive TUI
+    Tui,
 }
 
 #[derive(Subcommand)]
@@ -1147,8 +1151,12 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Commands::Tui => {
+            let repo = get_repo_root(cli.repo.clone())?;
+            tui::run_tui(repo)?;
+        }
     }
-    
+
     Ok(())
 }
 

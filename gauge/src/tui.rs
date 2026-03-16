@@ -187,7 +187,7 @@ impl App {
             .split(f.size());
 
         // Title
-        let title = Paragraph::new("Karduun Gauge — Semantic Volume Analyzer")
+        let title = Paragraph::new("Karduun Gauge — measuring cups of semantic volume")
             .style(Style::default().fg(Color::Cyan))
             .block(Block::default().borders(Borders::ALL));
         f.render_widget(title, chunks[0]);
@@ -246,16 +246,15 @@ impl App {
                         Span::styled("▶ ", Style::default().fg(Color::White)),
                         Span::styled(
                             format!("{:<28}", title),
-                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(
                             format!(" {:>4}t", tokens),
                             Style::default().fg(Color::DarkGray),
                         ),
-                        Span::styled(
-                            format!(" {:>5.2}", sv),
-                            Style::default().fg(Color::White),
-                        ),
+                        Span::styled(format!(" {:>5.2}", sv), Style::default().fg(Color::White)),
                         Span::styled(
                             format!(" {} {}", icon, a.suggestion),
                             Style::default().fg(color),
@@ -264,10 +263,7 @@ impl App {
                 } else {
                     ListItem::new(Line::from(vec![
                         Span::raw("  "),
-                        Span::styled(
-                            format!("{:<28}", title),
-                            Style::default().fg(Color::White),
-                        ),
+                        Span::styled(format!("{:<28}", title), Style::default().fg(Color::White)),
                         Span::styled(
                             format!(" {:>4}t", tokens),
                             Style::default().fg(Color::DarkGray),
@@ -302,7 +298,9 @@ impl App {
             let mut lines: Vec<Line> = vec![
                 Line::from(Span::styled(
                     truncate(&a.card.title, 40),
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(Span::styled(
                     format!("slug: {}", a.card.slug),
@@ -327,7 +325,10 @@ impl App {
                 ]),
                 Line::from(vec![
                     Span::styled("Struct den:", Style::default().fg(Color::DarkGray)),
-                    Span::styled(format!("{:.2}", struct_d), Style::default().fg(Color::White)),
+                    Span::styled(
+                        format!("{:.2}", struct_d),
+                        Style::default().fg(Color::White),
+                    ),
                 ]),
             ];
 
