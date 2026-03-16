@@ -53,13 +53,24 @@ impl App {
         self.filtered_cards.get(self.selected_index)
     }
 
-    fn build_tree_view(&self, card: &Card, cards_map: &std::collections::HashMap<String, &Card>) -> Vec<String> {
+    fn build_tree_view(
+        &self,
+        card: &Card,
+        cards_map: &std::collections::HashMap<String, &Card>,
+    ) -> Vec<String> {
         let mut lines = vec![];
 
         // Find parent links
         for (_, potential_parent) in cards_map {
-            if potential_parent.links.iter().any(|l| l.to == card.uid && (l.r#type == "parent-of" || l.r#type == "contains")) {
-                lines.push(format!("└─ {} - {}", potential_parent.uid, potential_parent.title));
+            if potential_parent
+                .links
+                .iter()
+                .any(|l| l.to == card.uid && (l.r#type == "parent-of" || l.r#type == "contains"))
+            {
+                lines.push(format!(
+                    "└─ {} - {}",
+                    potential_parent.uid, potential_parent.title
+                ));
             }
         }
 
@@ -75,13 +86,20 @@ impl App {
         lines
     }
 
-    fn build_backlinks_view(&self, card: &Card, cards_map: &std::collections::HashMap<String, &Card>) -> Vec<String> {
+    fn build_backlinks_view(
+        &self,
+        card: &Card,
+        cards_map: &std::collections::HashMap<String, &Card>,
+    ) -> Vec<String> {
         let mut lines = vec![];
 
         // Find cards that link to this card
         for (_, potential_linker) in cards_map {
             if potential_linker.links.iter().any(|l| l.to == card.uid) {
-                lines.push(format!("• {} - {}", potential_linker.uid, potential_linker.title));
+                lines.push(format!(
+                    "• {} - {}",
+                    potential_linker.uid, potential_linker.title
+                ));
             }
         }
 
@@ -96,8 +114,14 @@ impl App {
         let mut lines = vec![];
         lines.push(format!("UID: {}", card.uid));
         lines.push(format!("Title: {}", card.title));
-        lines.push(format!("Created: {}", card.created.format("%Y-%m-%d %H:%M")));
-        lines.push(format!("Updated: {}", card.updated.format("%Y-%m-%d %H:%M")));
+        lines.push(format!(
+            "Created: {}",
+            card.created.format("%Y-%m-%d %H:%M")
+        ));
+        lines.push(format!(
+            "Updated: {}",
+            card.updated.format("%Y-%m-%d %H:%M")
+        ));
         let tags_text = if card.tags.is_empty() {
             "None".to_string()
         } else {
@@ -137,16 +161,19 @@ impl App {
     fn ui(&self, f: &mut ratatui::Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3),
-                Constraint::Length(3),
-                Constraint::Min(0),
-                Constraint::Length(1)
-            ].as_ref())
+            .constraints(
+                [
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Min(0),
+                    Constraint::Length(1),
+                ]
+                .as_ref(),
+            )
             .split(f.size());
 
         // Title
-        let title = Paragraph::new("Karduun Scout --- quering cards")
+        let title = Paragraph::new("Karduun Scout - your card query quarry")
             .style(Style::default().fg(Color::Cyan))
             .block(Block::default().borders(Borders::ALL));
         f.render_widget(title, chunks[0]);
@@ -156,16 +183,29 @@ impl App {
         let search_text = if self.search_mode {
             format!("{}{}", search_prefix, self.search_query)
         } else {
-            format!("{}{}", search_prefix, if self.search_query.is_empty() { "Search..." } else { &self.search_query })
+            format!(
+                "{}{}",
+                search_prefix,
+                if self.search_query.is_empty() {
+                    "Search..."
+                } else {
+                    &self.search_query
+                }
+            )
         };
 
         let search_bar = Paragraph::new(search_text)
-            .style(Style::default().fg(if self.search_mode { Color::Yellow } else { Color::Gray }))
+            .style(Style::default().fg(if self.search_mode {
+                Color::Yellow
+            } else {
+                Color::Gray
+            }))
             .block(Block::default().borders(Borders::ALL).title("Search"));
         f.render_widget(search_bar, chunks[1]);
 
         // Card list
-        let items: Vec<ListItem> = self.filtered_cards
+        let items: Vec<ListItem> = self
+            .filtered_cards
             .iter()
             .enumerate()
             .map(|(i, card)| {
@@ -184,8 +224,11 @@ impl App {
             })
             .collect();
 
-        let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(format!("Cards ({}/{})", self.filtered_cards.len(), self.cards.len())));
+        let list = List::new(items).block(Block::default().borders(Borders::ALL).title(format!(
+            "Cards ({}/{})",
+            self.filtered_cards.len(),
+            self.cards.len()
+        )));
         f.render_widget(list, chunks[2]);
 
         // Main content area with horizontal split
@@ -195,7 +238,8 @@ impl App {
             .split(chunks[2]);
 
         // Left panel - Card list (no wrapping, truncate long titles)
-        let items: Vec<ListItem> = self.filtered_cards
+        let items: Vec<ListItem> = self
+            .filtered_cards
             .iter()
             .enumerate()
             .map(|(i, card)| {
@@ -218,13 +262,18 @@ impl App {
             })
             .collect();
 
-        let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(format!("Cards ({}/{})", self.filtered_cards.len(), self.cards.len())));
+        let list = List::new(items).block(Block::default().borders(Borders::ALL).title(format!(
+            "Cards ({}/{})",
+            self.filtered_cards.len(),
+            self.cards.len()
+        )));
         f.render_widget(list, horizontal_chunks[0]);
 
         // Right panel - Dynamic content based on view mode
         if let Some(selected_card) = self.get_selected_card() {
-            let cards_map: std::collections::HashMap<String, &Card> = self.cards.iter()
+            let cards_map: std::collections::HashMap<String, &Card> = self
+                .cards
+                .iter()
                 .map(|card| (card.uid.clone(), card))
                 .collect();
 
@@ -250,11 +299,11 @@ impl App {
                         .wrap(ratatui::widgets::Wrap { trim: true })
                         .block(Block::default().borders(Borders::ALL).title("Card Details"))
                 }
-                ViewMode::List => {
-                    Paragraph::new("Select a card and press:\n• T: Tree View\n• B: Backlinks\n• D: Details")
-                        .wrap(ratatui::widgets::Wrap { trim: true })
-                        .block(Block::default().borders(Borders::ALL).title("Info"))
-                }
+                ViewMode::List => Paragraph::new(
+                    "Select a card and press:\n• T: Tree View\n• B: Backlinks\n• D: Details",
+                )
+                .wrap(ratatui::widgets::Wrap { trim: true })
+                .block(Block::default().borders(Borders::ALL).title("Info")),
             };
             f.render_widget(right_content, horizontal_chunks[1]);
         } else {
@@ -264,8 +313,10 @@ impl App {
         }
 
         // Help text
-        let help = Paragraph::new("↑/↓: Navigate  /: Search  Esc: Exit  q: Quit  T: Tree  B: Backlinks  D: Details")
-            .style(Style::default().fg(Color::Gray));
+        let help = Paragraph::new(
+            "↑/↓: Navigate  /: Search  Esc: Exit  q: Quit  T: Tree  B: Backlinks  D: Details",
+        )
+        .style(Style::default().fg(Color::Gray));
         f.render_widget(help, chunks[3]);
     }
 
