@@ -10,6 +10,8 @@ members = [
     "porter",
     "notary",
     "e2e",
+    "album",
+    "publisher",
 ]
 resolver = "2"
 
@@ -36,4 +38,3 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 jsonschema = "0.18"
 blake3 = "1.5"
 hex = "0.4"
-

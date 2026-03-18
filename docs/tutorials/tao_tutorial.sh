@@ -137,13 +137,39 @@ echo_success "Created and populated Taoism deck"
 echo ""
 
 # ============================================================================
-# STEP 5: Show Results
+# STEP 5: Publish Cards and Manage Albums
 # ============================================================================
-echo_section "Step 5: Viewing Results"
+echo_section "Step 5: Publishing Cards and Managing Albums"
+
+echo_info "Creating a new album for published cards..."
+album create "Published Taoism"
+
+echo_info "Publishing cards to the album..."
+publisher publish "Published Taoism" "tao"
+publisher publish "Published Taoism" "wuwei"
+publisher publish "Published Taoism" "yinyang"
+publisher publish "Published Taoism" "laozi"
+publisher publish "Published Taoism" "zhuangzi"
+publisher publish "Published Taoism" "liezi"
+
+echo_info "Listing publications for a card..."
+publisher list "tao"
+
+echo_info "Showing cards in the published album..."
+album show "Published Taoism"
+
+echo_success "Published cards and managed albums successfully!"
+
+echo ""
+
+# ============================================================================
+# STEP 6: Show Results
+# ============================================================================
+echo_section "Step 6: Viewing Results"
 
 echo_info "Displaying deck contents..."
 scribe deck show "taoism-fundamentals"
 
 echo ""
 echo_success "Taoism tutorial completed successfully!"
-echo_info "You can explore the created cards and deck in the $WORKDIR directory."
+echo_info "You can explore the created cards, deck, and albums in the $WORKDIR directory."

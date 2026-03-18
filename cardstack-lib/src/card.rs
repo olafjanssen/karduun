@@ -28,6 +28,8 @@ pub struct Card {
     pub facets: Option<Facets>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sign: Option<Signature>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub publications: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub computed: Option<Computed>,
 }
@@ -155,6 +157,7 @@ impl Card {
             fields: HashMap::new(),
             links: Vec::new(),
             facets: None,
+            publications: Vec::new(),
             sign: None,
             computed: None,
         }
