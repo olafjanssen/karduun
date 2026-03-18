@@ -170,11 +170,29 @@ fn compute_bandwidth(sentences: &[String], model: &mut TextEmbedding) -> Result<
         .sum::<f64>()
         / distances.len() as f64;
     let clusters: u32 = if mean_dist < 0.3 {
-        if variance < 0.01 { 1 } else if variance < 0.05 { 2 } else { 3 }
+        if variance < 0.01 {
+            1
+        } else if variance < 0.05 {
+            2
+        } else {
+            3
+        }
     } else if mean_dist < 0.5 {
-        if variance < 0.02 { 2 } else if variance < 0.08 { 3 } else { 4 }
+        if variance < 0.02 {
+            2
+        } else if variance < 0.08 {
+            3
+        } else {
+            4
+        }
     } else {
-        if variance < 0.05 { 3 } else if variance < 0.15 { 4 } else { 5 }
+        if variance < 0.05 {
+            3
+        } else if variance < 0.15 {
+            4
+        } else {
+            5
+        }
     };
     Ok(clusters.max(1).min(5))
 }
@@ -183,11 +201,7 @@ fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
     1.0 - cosine_similarity(a, b)
 }
 
-fn compute_redundancy(
-    card: &Card,
-    neighbors: &[Card],
-    model: &mut TextEmbedding,
-) -> Result<f64> {
+fn compute_redundancy(card: &Card, neighbors: &[Card], model: &mut TextEmbedding) -> Result<f64> {
     if neighbors.is_empty() {
         return Ok(0.0);
     }
@@ -201,8 +215,11 @@ fn compute_redundancy(
     }
     let mut max_similarity: f64 = 0.0;
     for neighbor in neighbors.iter().take(10) {
-        let neighbor_text =
-            format!("{} {}", neighbor.title, neighbor.get_content().unwrap_or(""));
+        let neighbor_text = format!(
+            "{} {}",
+            neighbor.title,
+            neighbor.get_content().unwrap_or("")
+        );
         if neighbor_text.trim().is_empty() {
             continue;
         }
@@ -234,18 +251,43 @@ fn analyze_card(
     neighbors_count: u32,
     mut model: Option<&mut TextEmbedding>,
 ) -> Result<Computed> {
-    let body = card.get_content().unwrap_or("");
+    // Construct a comprehensive textual representation of the card
+    let mut body_parts: Vec<String> = Vec::new();
+
+    // Add title
+    body_parts.push(card.title.clone());
+
+    // Add keywords
+    if !card.keywords.is_empty() {
+        body_parts.push(card.keywords.join(" "));
+    }
+
+    // Add fields
+    for (key, value) in &card.fields {
+        if let Some(value_str) = value.as_str() {
+            body_parts.push(format!("{} {}", key, value_str));
+        } else if let Some(value_str) = value.as_str() {
+            body_parts.push(format!("{} {}", key, value_str));
+        }
+    }
+
+    // Add content body if available
+    if let Some(content) = card.get_content() {
+        body_parts.push(content.to_string());
+    }
+
+    let body = body_parts.join(" ");
     let tokens = if let Some(ref m) = model {
-        count_tokens(body, m)
+        count_tokens(&body, m)
     } else {
         body.split_whitespace().count() as u32
     };
-    let nid_bpt = compute_nid_bpt(body, tokens);
+    let nid_bpt = compute_nid_bpt(&body, tokens);
     let link_density = compute_link_density(card.links.len(), tokens);
-    let structure_density = compute_structure_density(body, tokens);
+    let structure_density = compute_structure_density(&body, tokens);
     let (cohesion, bandwidth, redundancy) = if analyzer_full && !body.is_empty() {
         if let Some(ref mut m) = model {
-            let sentences = extract_sentences(body);
+            let sentences = extract_sentences(&body);
             let cohesion_val = compute_cohesion(&sentences, m)?;
             let bandwidth_val = compute_bandwidth(&sentences, m)?;
             let neighbors: Vec<Card> = all_cards
@@ -255,7 +297,11 @@ fn analyze_card(
                 .cloned()
                 .collect();
             let redundancy_val = compute_redundancy(&card, &neighbors, m)?;
-            (Some(cohesion_val), Some(bandwidth_val), Some(redundancy_val))
+            (
+                Some(cohesion_val),
+                Some(bandwidth_val),
+                Some(redundancy_val),
+            )
         } else {
             (None, None, None)
         }
@@ -300,7 +346,10 @@ fn suggest_action(computed: &Computed) -> (String, String) {
     if (tokens > 350 && bandwidth >= 3) || (cohesion < 0.45 && tokens > 250) {
         return (
             "split".to_string(),
-            format!("tokens={} bandwidth={} cohesion={:.2}", tokens, bandwidth, cohesion),
+            format!(
+                "tokens={} bandwidth={} cohesion={:.2}",
+                tokens, bandwidth, cohesion
+            ),
         );
     }
     if tokens < 80 && redundancy > 0.85 {
@@ -321,7 +370,10 @@ fn suggest_action(computed: &Computed) -> (String, String) {
     if tokens > 300 && structure_density < 0.8 {
         return (
             "refactor".to_string(),
-            format!("tokens={} structure_density={:.2}", tokens, structure_density),
+            format!(
+                "tokens={} structure_density={:.2}",
+                tokens, structure_density
+            ),
         );
     }
     if sv > 1.6 {
@@ -388,7 +440,10 @@ fn main() -> Result<()> {
                         Some(m)
                     }
                     Err(e) => {
-                        eprintln!("Warning: Could not load embedding model ({}), using fast analysis", e);
+                        eprintln!(
+                            "Warning: Could not load embedding model ({}), using fast analysis",
+                            e
+                        );
                         None
                     }
                 }
@@ -396,8 +451,15 @@ fn main() -> Result<()> {
                 None
             };
 
-            eprintln!("Analyzing {} cards{}...", cards.len(),
-                if model_opt.is_some() { " with embeddings" } else { "" });
+            eprintln!(
+                "Analyzing {} cards{}...",
+                cards.len(),
+                if model_opt.is_some() {
+                    " with embeddings"
+                } else {
+                    ""
+                }
+            );
 
             let analyses: Vec<tui::CardAnalysis> = cards
                 .into_iter()
@@ -410,14 +472,22 @@ fn main() -> Result<()> {
                         model_opt.as_mut(),
                     )?;
                     let (suggestion, rationale) = suggest_action(&computed);
-                    Ok(tui::CardAnalysis { card, computed, suggestion, rationale })
+                    Ok(tui::CardAnalysis {
+                        card,
+                        computed,
+                        suggestion,
+                        rationale,
+                    })
                 })
                 .collect::<Result<_>>()?;
 
             tui::run_tui(analyses)?;
         }
 
-        Commands::Analyze { uid, query: query_str } => {
+        Commands::Analyze {
+            uid,
+            query: query_str,
+        } => {
             let mut model_opt = if analyzer_full {
                 match init_embedding_model() {
                     Ok(m) => {
@@ -502,7 +572,10 @@ fn main() -> Result<()> {
                     if let Some(r) = computed.redundancy {
                         println_or_break!("  Redundancy: {:.2}", r);
                     }
-                    println_or_break!("  Link density: {:.2}", computed.link_density.unwrap_or(0.0));
+                    println_or_break!(
+                        "  Link density: {:.2}",
+                        computed.link_density.unwrap_or(0.0)
+                    );
                     println_or_break!(
                         "  Structure density: {:.2}",
                         computed.structure_density.unwrap_or(0.0)

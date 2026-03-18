@@ -55,30 +55,40 @@ gauge analyze --jsonl
 
 ### Core Metrics
 
-- **tokens** - Word/token count in card content
-- **nid_bpt** - Normalized Information Density (bits per token) via gzip compression
-- **link_density** - Number of links per 100 tokens
-- **structure_density** - Headings/bullets/codeblocks per 100 tokens
+- **tokens** - Word/token count in card content. This metric measures the size of the card. Higher token counts generally increase the semantic volume, but excessively high counts may indicate the card is too large and should be split.
+- **nid_bpt** - Normalized Information Density (bits per token) via gzip compression. This metric measures the information density of the card by compressing the text and calculating the bits per token. Higher values indicate more information-dense content, which positively impacts semantic volume.
+- **link_density** - Number of links per 100 tokens. This metric measures how well-connected the card is to other cards or external resources. Higher link density can increase semantic volume by providing additional context and references.
+- **structure_density** - Headings/bullets/codeblocks per 100 tokens. This metric measures the organizational structure of the card. Higher structure density improves readability and can positively impact semantic volume by making the content more accessible.
 
 ### Advanced Metrics (Full Analyzer)
 
-- **cohesion** - Mean pairwise similarity of sentences (0-1, higher = more cohesive)
-- **bandwidth** - Estimated number of topic clusters (1-5)
-- **redundancy** - Maximum similarity to nearest neighbor card (0-1, higher = more redundant)
-- **sv** - Composite Semantic Volume score
+- **cohesion** - Mean pairwise similarity of sentences (0-1, higher = more cohesive). This metric measures how well the sentences in the card relate to each other. Higher cohesion indicates a more focused and unified card, which positively impacts semantic volume.
+- **bandwidth** - Estimated number of topic clusters (1-5). This metric estimates the number of distinct topics covered in the card. Lower bandwidth indicates a more focused card, which can positively impact semantic volume.
+- **redundancy** - Maximum similarity to nearest neighbor card (0-1, higher = more redundant). This metric measures how similar the card is to other cards in the repository. Higher redundancy negatively impacts semantic volume, as it indicates duplicate or overlapping content.
+- **sv** - Composite Semantic Volume score. This is the overall score that combines all metrics to provide a single measure of the card's semantic quality. It is used to determine whether the card should be split, merged, pruned, or refactored.
 
 ### Semantic Volume (SV)
 
-The composite SV score combines:
-- Size normalization (tokens / 200)
-- Information density (NID factor)
-- Cohesion (how unified the content is)
-- Redundancy (uniqueness relative to neighbors)
+The composite SV score combines multiple metrics to provide a single measure of the card's semantic quality. The formula for computing SV is:
+
+```
+SV = tokens_norm * nid_factor * cohesion_factor * redundancy_factor
+```
+
+Where:
+- **tokens_norm** = tokens / 200 (normalized token count)
+- **nid_factor** = (nid_bpt / 5.0).clamp(0.5, 1.5) (normalized information density)
+- **cohesion_factor** = (cohesion / 0.7).clamp(0.6, 1.4) (normalized cohesion)
+- **redundancy_factor** = (1.0 - redundancy).clamp(0.5, 1.3) (normalized redundancy)
 
 **SV Interpretation:**
-- `sv ~ 1.0` - Well-sized card
-- `sv > 1.6` - Too large/packed → consider split
-- `sv < 0.5` - Too small/empty → consider merge
+- `sv ~ 1.0` - Well-sized card with balanced metrics
+- `sv > 1.6` - Too large or packed with information → consider splitting the card
+- `sv < 0.5` - Too small or empty → consider merging with another card
+
+**Implications of SV on Card Quality:**
+- **High SV**: Indicates a card that is large, information-dense, and cohesive. While this can be positive, excessively high SV may suggest the card is too broad or complex.
+- **Low SV**: Indicates a card that is small, lacks information density, or is redundant. This may suggest the card is too narrow or duplicates content from other cards.
 
 ## Analysis Profiles
 
