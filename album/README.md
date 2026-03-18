@@ -22,11 +22,11 @@ Create a new album.
 
 **Usage:**
 ```bash
-album create --name <album_name>
+album create <album_name>
 ```
 
 **Options:**
-- `--name <album_name>` - Name of the album to create
+- `<album_name>` - Name of the album to create
 
 **Examples:**
 ```bash
@@ -55,12 +55,12 @@ Add a card to an album.
 
 **Usage:**
 ```bash
-album add --album <album_name> --card <card_uid_or_slug>
+album add <album_name> <card_uid_or_slug>
 ```
 
 **Options:**
-- `--album <album_name>` - Name of the album
-- `--card <card_uid_or_slug>` - UID or slug of the card to add
+- `<album_name>` - Name of the album
+- `<card_uid_or_slug>` - UID or slug of the card to add
 
 **Examples:**
 ```bash
@@ -74,13 +74,13 @@ Transfer a card to another album.
 
 **Usage:**
 ```bash
-album transfer --from <source_album> --to <destination_album> --card <card_uid_or_slug>
+album transfer <source_album> <destination_album> <card_uid_or_slug>
 ```
 
 **Options:**
-- `--from <source_album>` - Name of the source album
-- `--to <destination_album>` - Name of the destination album
-- `--card <card_uid_or_slug>` - UID or slug of the card to transfer
+- `<source_album>` - Name of the source album
+- `<destination_album>` - Name of the destination album
+- `<card_uid_or_slug>` - UID or slug of the card to transfer
 
 **Examples:**
 ```bash
@@ -94,11 +94,11 @@ Archive an album.
 
 **Usage:**
 ```bash
-album archive --name <album_name>
+album archive <album_name>
 ```
 
 **Options:**
-- `--name <album_name>` - Name of the album to archive
+- `<album_name>` - Name of the album to archive
 
 **Examples:**
 ```bash
@@ -112,16 +112,16 @@ List cards in an album.
 
 **Usage:**
 ```bash
-album show --name <album_name>
+album show <album_name>
 ```
 
 **Options:**
-- `--name <album_name>` - Name of the album
+- `<album_name>` - Name of the album
 
 **Examples:**
 ```bash
 # List cards in an album
-album show --name "Research Papers"
+album show "Research Papers"
 ```
 
 ## Global Options
@@ -135,10 +135,10 @@ All commands support:
 ### Create and Manage Albums
 ```bash
 # Create a new album
-album create --name "Research Papers"
+album create "Research Papers"
 
 # Add a card to the album
-album add --album "Research Papers" --card "my-card"
+album add "Research Papers" "my-card"
 
 # List all albums
 album list
@@ -150,13 +150,13 @@ album show --name "Research Papers"
 ### Transfer Cards Between Albums
 ```bash
 # Transfer a card from one album to another
-album transfer --from "Drafts" --to "Research Papers" --card "my-card"
+album transfer "Drafts" "Research Papers" "my-card"
 ```
 
 ### Archive Albums
 ```bash
 # Archive an old album
-album archive --name "Old Research"
+album archive "Old Research"
 ```
 
 ## Configuration

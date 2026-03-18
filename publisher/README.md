@@ -22,12 +22,12 @@ Publish a card to an album.
 
 **Usage:**
 ```bash
-publisher publish --album <album_name> --card <card_uid_or_slug>
+publisher publish [--album <album_name>] <card_uid_or_slug>
 ```
 
 **Options:**
-- `--album <album_name>` - Name of the album to publish to
-- `--card <card_uid_or_slug>` - UID or slug of the card to publish
+- `--album <album_name>` - Name of the album to publish to (optional, defaults to "general")
+- `<card_uid_or_slug>` - UID or slug of the card to publish
 
 **Examples:**
 ```bash
@@ -41,12 +41,12 @@ Unpublish a card from an album.
 
 **Usage:**
 ```bash
-publisher unpublish --album <album_name> --card <card_uid_or_slug>
+publisher unpublish [--album <album_name>] <card_uid_or_slug>
 ```
 
 **Options:**
-- `--album <album_name>` - Name of the album to unpublish from
-- `--card <card_uid_or_slug>` - UID or slug of the card to unpublish
+- `--album <album_name>` - Name of the album to unpublish from (optional, defaults to "general")
+- `<card_uid_or_slug>` - UID or slug of the card to unpublish
 
 **Examples:**
 ```bash
@@ -60,11 +60,11 @@ List publications for a card.
 
 **Usage:**
 ```bash
-publisher list --card <card_uid_or_slug>
+publisher list <card_uid_or_slug>
 ```
 
 **Options:**
-- `--card <card_uid_or_slug>` - UID or slug of the card
+- `<card_uid_or_slug>` - UID or slug of the card
 
 **Examples:**
 ```bash
@@ -80,17 +80,23 @@ All commands support:
 
 ## Examples
 
-### Publish and Manage Cards
+# Publish and Manage Cards
 
 ```bash
-# Publish a card to an album
-publisher publish --album "Research Papers" --card "my-card"
+# Publish a card to the default "general" album
+publisher publish "my-card"
+
+# Publish a card to a specific album
+publisher publish --album "Research Papers" "my-card"
 
 # List publications for a card
-publisher list --card "my-card"
+publisher list "my-card"
 
-# Unpublish a card from an album
-publisher unpublish --album "Research Papers" --card "my-card"
+# Unpublish a card from the default "general" album
+publisher unpublish "my-card"
+
+# Unpublish a card from a specific album
+publisher unpublish --album "Research Papers" "my-card"
 ```
 
 ## Configuration

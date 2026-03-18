@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod tui;
+
 #[derive(Parser)]
 #[command(name = "publisher")]
 #[command(about = "Publish cards to albums", long_about = None)]
@@ -21,7 +23,7 @@ enum Commands {
     /// Publish a card to an album
     Publish {
         /// Album name
-        #[arg(default_value = "general")]
+        #[arg(long, default_value = "general")]
         album: String,
         /// Card UID or slug
         card: String,
@@ -39,6 +41,8 @@ enum Commands {
         /// Card UID or slug
         card: String,
     },
+    /// Run the TUI
+    Tui,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +155,10 @@ fn main() -> Result<()> {
                     println!("- {}", album);
                 }
             }
+        }
+        Commands::Tui => {
+            let all_cards = load_all_cards(&repo)?;
+            tui::run_tui(all_cards)?;
         }
     }
 
