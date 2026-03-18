@@ -58,7 +58,7 @@ gauge analyze --jsonl
 - **tokens** - Word/token count in card content. This metric measures the size of the card. Higher token counts generally increase the semantic volume, but excessively high counts may indicate the card is too large and should be split.
 - **nid_bpt** - Normalized Information Density (bits per token) via gzip compression. This metric measures the information density of the card by compressing the text and calculating the bits per token. Higher values indicate more information-dense content, which positively impacts semantic volume.
 - **link_density** - Number of links per 100 tokens. This metric measures how well-connected the card is to other cards or external resources. Higher link density can increase semantic volume by providing additional context and references.
-- **structure_density** - Headings/bullets/codeblocks per 100 tokens. This metric measures the organizational structure of the card. Higher structure density improves readability and can positively impact semantic volume by making the content more accessible.
+
 
 ### Advanced Metrics (Full Analyzer)
 
@@ -96,7 +96,7 @@ Where:
 ```bash
 gauge analyze --analyzer fast
 ```
-- Computes: tokens, NID, link density, structure density
+- Computes: tokens, NID, link density
 - No embeddings required
 - Very fast (<50ms per card)
 - Useful for quick assessments
@@ -135,8 +135,8 @@ Gauge suggests actions based on metrics:
 **Rationale:** Card has low value or high redundancy
 
 ### `refactor`
-**Trigger:** Cards needing structure improvements
-- `tokens > 300 && structure_density < 0.8`
+**Trigger:** Cards needing improvements
+- `tokens > 300`
 
 **Rationale:** Card content would benefit from better organization
 
@@ -158,7 +158,6 @@ Card: Research Note (ulid_01ABC...)
   Bandwidth: 2
   Redundancy: 0.31
   Link density: 0.9
-  Structure density: 1.3
   SV: 0.98
   Suggestion: ok
 ```
@@ -177,7 +176,6 @@ Each line is an `AnalysisResult`:
     "bandwidth": 2,
     "redundancy": 0.31,
     "link_density": 0.9,
-    "structure_density": 1.3,
     "sv": 0.98,
     "last_analyzed": "2025-01-15T10:30:00Z"
   },
@@ -232,8 +230,8 @@ Thresholds can be configured in `.cardstack/config.yml`:
 thresholds:
   split: "(tokens>350 && bandwidth>=3) || (cohesion<0.45 && tokens>250)"
   merge: "tokens<80 && redundancy>0.85"
-  prune: "redundancy>0.9 && backlinks=0 && age>120"
-  refactor: "tokens>300 && structure_density<0.8"
+  "redundancy > 0.9 && backlinks=0 && age>120"
+  refactor: "tokens>300"
 ```
 
 ## Algorithm Details

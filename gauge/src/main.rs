@@ -89,17 +89,6 @@ fn extract_sentences(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn compute_structure_density(text: &str, tokens: u32) -> f64 {
-    if tokens == 0 {
-        return 0.0;
-    }
-    let headings = text.matches('#').count();
-    let bullets = text.matches('-').count() + text.matches('*').count();
-    let codeblocks = text.matches("```").count() / 2;
-    let structures = headings + bullets + codeblocks;
-    (structures as f64 / tokens as f64) * 100.0
-}
-
 fn compute_link_density(link_count: usize, tokens: u32) -> f64 {
     if tokens == 0 {
         return 0.0;
@@ -284,7 +273,6 @@ fn analyze_card(
     };
     let nid_bpt = compute_nid_bpt(&body, tokens);
     let link_density = compute_link_density(card.links.len(), tokens);
-    let structure_density = compute_structure_density(&body, tokens);
     let (cohesion, bandwidth, redundancy) = if analyzer_full && !body.is_empty() {
         if let Some(ref mut m) = model {
             let sentences = extract_sentences(&body);
@@ -315,7 +303,6 @@ fn analyze_card(
         bandwidth,
         redundancy,
         link_density: Some(link_density),
-        structure_density: Some(structure_density),
         sv: None,
         last_analyzed: Some(chrono::Utc::now()),
     };
@@ -340,7 +327,6 @@ fn suggest_action(computed: &Computed) -> (String, String) {
     let cohesion = computed.cohesion.unwrap_or(0.7);
     let redundancy = computed.redundancy.unwrap_or(0.0);
     let sv = computed.sv.unwrap_or(1.0);
-    let structure_density = computed.structure_density.unwrap_or(0.0);
     let nid_bpt = computed.nid_bpt.unwrap_or(5.0);
 
     if (tokens > 350 && bandwidth >= 3) || (cohesion < 0.45 && tokens > 250) {
@@ -367,14 +353,8 @@ fn suggest_action(computed: &Computed) -> (String, String) {
             ),
         );
     }
-    if tokens > 300 && structure_density < 0.8 {
-        return (
-            "refactor".to_string(),
-            format!(
-                "tokens={} structure_density={:.2}",
-                tokens, structure_density
-            ),
-        );
+    if tokens > 300 {
+        return ("refactor".to_string(), format!("tokens={}", tokens));
     }
     if sv > 1.6 {
         return ("consider-split".to_string(), format!("sv={:.2}", sv));
@@ -575,10 +555,6 @@ fn main() -> Result<()> {
                     println_or_break!(
                         "  Link density: {:.2}",
                         computed.link_density.unwrap_or(0.0)
-                    );
-                    println_or_break!(
-                        "  Structure density: {:.2}",
-                        computed.structure_density.unwrap_or(0.0)
                     );
                     println_or_break!("  SV: {:.2}", computed.sv.unwrap_or(0.0));
                     println_or_break!("  Suggestion: {}", suggestion);

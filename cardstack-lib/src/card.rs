@@ -133,7 +133,6 @@ pub struct Computed {
     pub bandwidth: Option<u32>,
     pub redundancy: Option<f64>,
     pub link_density: Option<f64>,
-    pub structure_density: Option<f64>,
     pub sv: Option<f64>,
     pub last_analyzed: Option<DateTime<Utc>>,
 }
@@ -226,17 +225,23 @@ impl From<Card> for CardEnvelope {
             uid: card.uid.clone(),
             slug: card.slug.clone(),
             title: card.title.clone(),
-            path: format!("cards/{}/{}/{}--{}.yaml", 
-                card.created.format("%Y"), 
+            path: format!(
+                "cards/{}/{}/{}--{}.yaml",
+                card.created.format("%Y"),
                 card.created.format("%m"),
-                card.uid, 
-                card.slug),
+                card.uid,
+                card.slug
+            ),
             created: card.created,
             updated: card.updated,
             tags: card.tags.clone(),
             fields: card.fields.clone(),
             links_out: card.links.clone(),
-            facets: card.facets.as_ref().map(|f| serde_json::to_value(f).ok()).flatten(),
+            facets: card
+                .facets
+                .as_ref()
+                .map(|f| serde_json::to_value(f).ok())
+                .flatten(),
             computed: card.computed.clone(),
         }
     }
@@ -248,7 +253,11 @@ mod tests {
 
     #[test]
     fn test_card_new() {
-        let card = Card::new("Test".to_string(), "test".to_string(), "ulid_01".to_string());
+        let card = Card::new(
+            "Test".to_string(),
+            "test".to_string(),
+            "ulid_01".to_string(),
+        );
         assert_eq!(card.kind, "card");
         assert_eq!(card.schema, 1);
         assert_eq!(card.title, "Test");
@@ -256,9 +265,12 @@ mod tests {
 
     #[test]
     fn test_card_with_content() {
-        let card = Card::new("Test".to_string(), "test".to_string(), "ulid_01".to_string())
-            .with_content("# Hello\n\nWorld".to_string());
+        let card = Card::new(
+            "Test".to_string(),
+            "test".to_string(),
+            "ulid_01".to_string(),
+        )
+        .with_content("# Hello\n\nWorld".to_string());
         assert_eq!(card.get_content(), Some("# Hello\n\nWorld"));
     }
 }
-

@@ -291,7 +291,6 @@ impl App {
             let tokens = a.computed.tokens.unwrap_or(0);
             let nid = a.computed.nid_bpt.unwrap_or(0.0);
             let link_d = a.computed.link_density.unwrap_or(0.0);
-            let struct_d = a.computed.structure_density.unwrap_or(0.0);
             let color = suggestion_color(&a.suggestion);
             let icon = suggestion_icon(&a.suggestion);
 
@@ -322,13 +321,6 @@ impl App {
                 Line::from(vec![
                     Span::styled("Link den:  ", Style::default().fg(Color::DarkGray)),
                     Span::styled(format!("{:.2}", link_d), Style::default().fg(Color::White)),
-                ]),
-                Line::from(vec![
-                    Span::styled("Struct den:", Style::default().fg(Color::DarkGray)),
-                    Span::styled(
-                        format!("{:.2}", struct_d),
-                        Style::default().fg(Color::White),
-                    ),
                 ]),
             ];
 
