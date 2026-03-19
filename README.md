@@ -27,6 +27,7 @@ A comprehensive Rust CLI toolkit for managing atomic cards and self-organizing d
 | **stencil** | Template management | `new`, `list`, `show`, `validate` |
 | **porter** | Import/Export | `export`, `import` |
 | **notary** | Signing & timestamping | `sign`, `verify`, `timestamp` |
+| **eco** | Ecosystem dynamics | `scan`, `resonance`, `print`, `mature`, `status`, `evolve` |
 
 ## Quick Start
 
@@ -48,6 +49,13 @@ scout list --jsonl | gauge analyze --jsonl
 
 # Self-organize your cards
 scout list --query "sv>1.6" --jsonl | gauge analyze --jsonl | curator autoclean --apply
+
+# Simulate ecosystem dynamics
+eco scan 01KM2NM1MT966JRKDFNWXS2Y6P --resonance-increase 0.5
+eco resonance 01KM2NM1MT966JRKDFNWXS2Y6P
+eco print 01KM2NM1MT966JRKDFNWXS2Y6P
+eco status
+eco evolve
 ```
 
 ## Installation
@@ -61,6 +69,15 @@ cargo install --path scribe
 cargo install --path scout
 # ... etc for each tool
 ```
+
+## Ecosystem Dynamics
+
+The **eco** tool implements a living ecosystem for knowledge cards with the following features:
+
+- **Resonance Tracking**: Cards gain resonance when scanned, representing community interest
+- **Printing Quotas**: Limited daily/weekly printing to maintain scarcity
+- **Maturation System**: High-resonance card clusters can spawn new concept cards
+- **Ecosystem Balance**: Automatic resonance decay and quota management
 
 ## Storage Model
 

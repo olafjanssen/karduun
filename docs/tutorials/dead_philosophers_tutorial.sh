@@ -19,36 +19,9 @@
 
 set -euo pipefail
 
-# Colors for output (optional, for better readability)
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-echo_info() {
-    echo -e "${BLUE}ℹ${NC} $1"
-}
-
-echo_success() {
-    echo -e "${GREEN}✓${NC} $1"
-}
-
-echo_warn() {
-    echo -e "${YELLOW}⚠${NC} $1"
-}
-
-echo_error() {
-    echo -e "${RED}✗${NC} $1"
-}
-
-echo_section() {
-    echo ""
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}$1${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-}
+# Source shared helper functions
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/tutorial_helpers.sh"
 
 # ============================================================================
 # STEP 1: Verify Installation
@@ -66,16 +39,15 @@ MISSING_CORE=()
 MISSING_OPTIONAL=()
 
 for tool in "${CORE_TOOLS[@]}"; do
-    if command -v "$tool" &> /dev/null; then
+    if check_tool_available "$tool"; then
         echo_success "$tool is installed: $($tool --version 2>/dev/null || $tool --help | head -1)"
     else
-        echo_warn "$tool is not found in PATH"
         MISSING_CORE+=("$tool")
     fi
 done
 
 for tool in "${OPTIONAL_TOOLS[@]}"; do
-    if command -v "$tool" &> /dev/null; then
+    if check_tool_available "$tool"; then
         echo_success "$tool is installed: $($tool --version 2>/dev/null || $tool --help | head -1)"
     else
         echo_warn "$tool (optional) is not found in PATH"
@@ -372,7 +344,7 @@ scout list --query "tag:philosopher fields.birth<0" 2>/dev/null || \
 # ============================================================================
 echo_section "Step 10: Optional - Semantic Analysis Pipeline"
 
-if command -v gauge &> /dev/null; then
+if check_tool_available "gauge"; then
     echo_info "Running semantic volume analysis on philosophers..."
     echo_info "(Output limited to first 5 results)"
     scout list --query "tag:philosopher status=deceased" --jsonl | gauge analyze --jsonl | head -n 5 || echo_warn "Analysis pipeline may need more setup"
@@ -385,9 +357,9 @@ fi
 # ============================================================================
 echo_section "Step 11: Creating Template with Stencil"
 
-if command -v stencil &> /dev/null; then
+if check_tool_available "stencil"; then
     echo_info "Creating a template for philosopher cards..."
-    
+
     # Check if template already exists
     if stencil show template-philosopher &>/dev/null; then
         echo_info "Template 'template-philosopher' already exists, skipping creation"
@@ -404,7 +376,7 @@ if command -v stencil &> /dev/null; then
           --frozen-field "fields.birth" \
           --frozen-field "fields.death" 2>&1)
         EXIT_CODE=$?
-        
+
         if [ $EXIT_CODE -eq 0 ]; then
             echo_success "Template created successfully"
             echo "$OUTPUT" | head -2
@@ -416,22 +388,22 @@ if command -v stencil &> /dev/null; then
             fi
         fi
     fi
-    
+
     echo ""
     echo_info "Listing all templates:"
     stencil list 2>/dev/null || echo_warn "stencil list failed"
-    
+
     echo ""
     echo_info "Showing template details:"
     stencil show template-philosopher 2>/dev/null || echo_warn "Could not show template"
-    
+
     echo ""
     echo_info "Validating existing philosopher cards against template:"
     stencil validate --query "tag:philosopher" 2>/dev/null || echo_warn "Template validation failed or command format differs"
-    
+
     echo ""
     echo_info "Demonstrating creating a new card from template (Immanuel Kant):"
-    
+
     # Verify template exists using stencil show (which will fail if template doesn't exist)
     if ! stencil show template-philosopher &>/dev/null; then
         echo_warn "Template 'template-philosopher' not found."
@@ -443,7 +415,7 @@ if command -v stencil &> /dev/null; then
         # Create a temporary file for the body content
         TEMP_BODY=$(mktemp)
         echo "German philosopher, central figure in modern philosophy" > "$TEMP_BODY"
-        
+
         # Check if card already exists
         if scout list --query "title:Immanuel Kant" 2>/dev/null | grep -q "Immanuel Kant"; then
             echo_info "Card 'Immanuel Kant' already exists, skipping creation"
@@ -461,7 +433,7 @@ if command -v stencil &> /dev/null; then
               --field school=Enlightenment \
               --body "$TEMP_BODY" 2>&1)
             EXIT_CODE=$?
-            
+
             if [ $EXIT_CODE -eq 0 ]; then
                 echo_success "Created card 'Immanuel Kant' from template"
                 echo "$OUTPUT" | head -1
@@ -489,20 +461,20 @@ fi
 # ============================================================================
 echo_section "Step 12: Organization Analysis with Curator"
 
-if command -v curator &> /dev/null && command -v gauge &> /dev/null; then
+if check_tool_available "curator" && check_tool_available "gauge"; then
     echo_info "Analyzing philosophers and creating organization plan..."
     echo_info "(This will show what curator would suggest for improvements)"
     echo_info "Note: This may take a moment as gauge initializes the embedding model..."
-    
+
     # Create a plan (dry-run by default)
     echo_info "Creating organization plan from analysis..."
     echo_info "(Showing first 3 actions, if any)"
     echo ""
-    
+
     # Run the pipeline directly - let it output naturally
     # Use a temp file to capture output and avoid blocking issues
     TEMP_PLAN=$(mktemp)
-    
+
     # Run pipeline and capture both stdout and stderr
     # Filter for JSON lines only (to skip "Initialized embedding model" messages)
     scout list --query "tag:philosopher status=deceased" --jsonl 2>/dev/null | \
@@ -510,7 +482,7 @@ if command -v curator &> /dev/null && command -v gauge &> /dev/null; then
       curator plan 2>&1 | \
       grep -E '^\{' | \
       head -n 3 > "$TEMP_PLAN" 2>&1 || true
-    
+
     # Check what we got
     if [ -s "$TEMP_PLAN" ]; then
         cat "$TEMP_PLAN"
@@ -522,9 +494,9 @@ if command -v curator &> /dev/null && command -v gauge &> /dev/null; then
         echo_info "No organization actions needed - all cards are well-structured"
         echo_info "(This means the cards are appropriately sized and organized)"
     fi
-    
+
     rm -f "$TEMP_PLAN"
-    
+
     echo ""
     echo_info "To review all actions:"
     echo "  scout list --query 'tag:philosopher status=deceased' --jsonl | gauge analyze --jsonl | curator plan"
@@ -540,29 +512,29 @@ fi
 # ============================================================================
 echo_section "Step 13: Signing Cards with Notary"
 
-if command -v notary &> /dev/null; then
+if check_tool_available "notary"; then
     echo_info "Notary provides cryptographic signing and verification for cards..."
-    
+
     # Generate a key pair (in a safe location)
     KEY_DIR=".keys"
     mkdir -p "$KEY_DIR"
-    
+
     echo_info "Generating signing key pair..."
     notary generate-key --out "$KEY_DIR" 2>/dev/null || echo_warn "Key generation failed (may already exist)"
-    
+
     if [ -f "$KEY_DIR/secret.key" ]; then
         echo_success "Key pair generated in $KEY_DIR/"
-        
+
         echo ""
         echo_info "Signing philosopher cards..."
         notary sign --query "tag:philosopher status=deceased" --key "$KEY_DIR/secret.key" 2>/dev/null || \
           echo_warn "Signing failed (may need different query or key format)"
-        
+
         echo ""
         echo_info "Verifying signatures..."
         notary verify --query "tag:philosopher status=deceased" --key "$KEY_DIR/public.key" 2>/dev/null || \
           echo_warn "Verification failed or no signatures found"
-        
+
         echo ""
         echo_info "Note: Keep $KEY_DIR/secret.key secure and never commit it to git!"
     else
@@ -577,17 +549,17 @@ fi
 # ============================================================================
 echo_section "Step 14: Exporting and Importing Cards with Porter"
 
-if command -v porter &> /dev/null; then
+if check_tool_available "porter"; then
     EXPORT_DIR="philosophers-export"
     mkdir -p "$EXPORT_DIR"
-    
+
     echo_info "Exporting philosopher cards to JSONL format..."
     if porter export --format jsonl --out "$EXPORT_DIR" --query "tag:philosopher" 2>/dev/null; then
         echo_success "Exported to JSONL format"
     else
         echo_warn "porter export failed (may need different query format)"
     fi
-    
+
     echo ""
     echo_info "Exporting to Markdown format..."
     if porter export --format md --out "$EXPORT_DIR/markdown" --query "tag:philosopher" 2>/dev/null; then
@@ -595,18 +567,18 @@ if command -v porter &> /dev/null; then
     else
         echo_warn "porter export to markdown failed"
     fi
-    
+
     if [ -d "$EXPORT_DIR" ]; then
         echo ""
         echo_success "Exports created in: $EXPORT_DIR"
         echo_info "Files:"
         ls -lh "$EXPORT_DIR" | head -5 || true
-        
+
         echo ""
         echo_info "Demonstrating import from JSONL export..."
         IMPORT_DIR="philosophers-import-test"
         mkdir -p "$IMPORT_DIR"
-        
+
         # Try to import (this would typically import into a separate location or test)
         if porter import --from jsonl --in "$EXPORT_DIR" --out "$IMPORT_DIR" 2>/dev/null; then
             echo_success "Import demonstration completed"
@@ -671,19 +643,19 @@ echo "  ✓ Viewed individual card details"
 echo "  ✓ Searched card content with scout grep"
 echo "  ✓ Created links between cards (student-of, influenced)"
 echo "  ✓ Performed advanced queries by school, nationality, and date ranges"
-if command -v stencil &> /dev/null; then
+if check_tool_available "stencil"; then
     echo "  ✓ Created philosopher template with constraints"
     echo "  ✓ Validated cards against template"
     echo "  ✓ Created new card from template"
 fi
-if command -v curator &> /dev/null; then
+if check_tool_available "curator"; then
     echo "  ✓ Analyzed organization opportunities"
 fi
-if command -v notary &> /dev/null; then
+if check_tool_available "notary"; then
     echo "  ✓ Generated signing keys"
     echo "  ✓ Signed and verified cards cryptographically"
 fi
-if command -v porter &> /dev/null; then
+if check_tool_available "porter"; then
     echo "  ✓ Exported cards to JSONL and Markdown formats"
     echo "  ✓ Demonstrated import functionality"
 fi
@@ -694,4 +666,3 @@ echo_info "You can now use these tools to build your own card collections."
 echo ""
 echo_info "Repository location: $(pwd)"
 echo ""
-

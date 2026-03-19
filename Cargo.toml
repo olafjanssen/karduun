@@ -12,6 +12,7 @@ members = [
     "e2e",
     "album",
     "publisher",
+    "eco",
 ]
 resolver = "2"
 
