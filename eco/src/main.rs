@@ -5,6 +5,8 @@ use clap::{Parser, Subcommand};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+mod tui;
+
 #[derive(Parser)]
 #[command(name = "eco")]
 #[command(about = "Card ecosystem dynamics simulator", long_about = None)]
@@ -48,6 +50,8 @@ enum Commands {
 
     /// Run one evolution cycle
     Evolve,
+    /// Launch interactive TUI for ecosystem management
+    Tui,
 }
 
 // Ecosystem configuration constants
@@ -146,6 +150,9 @@ fn main() -> Result<()> {
         }
         Commands::Evolve => {
             evolve_ecosystem(&repo_root)?;
+        }
+        Commands::Tui => {
+            tui::run_tui(&repo_root)?;
         }
     }
 
