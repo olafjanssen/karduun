@@ -1,0 +1,21 @@
+[package]
+name = "karduun-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "karduun-mcp"
+path = "src/main.rs"
+
+[dependencies]
+mcp-sdk-rs = "0.1"
+mcp-core = "0.1"
+cardstack-lib = { path = "../cardstack-lib" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1.89"
+thiserror.workspace = true
