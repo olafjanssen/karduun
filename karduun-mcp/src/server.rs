@@ -1,7 +1,6 @@
 use crate::error::KarduunMcpError;
 use crate::state::ServerState;
 use async_trait::async_trait;
-use mcp_sdk_rs::error::ErrorCode;
 use mcp_sdk_rs::protocol::RequestId;
 use mcp_sdk_rs::server::ServerHandler;
 use mcp_sdk_rs::{
@@ -13,7 +12,7 @@ use std::sync::{Arc, Mutex};
 
 pub struct KarduunMcpServer {
     state: ServerState,
-    handlers: Arc<Mutex<HashMap<String, Box<dyn KarduunToolHandler + Send + Sync>>>>,
+    handlers: Arc<Mutex<HashMap<String, Arc<dyn KarduunToolHandler + Send + Sync>>>>,
 }
 
 impl KarduunMcpServer {
@@ -30,33 +29,83 @@ impl KarduunMcpServer {
         handler: Box<dyn KarduunToolHandler + Send + Sync>,
     ) {
         let mut handlers = self.handlers.lock().unwrap();
-        handlers.insert(tool_name.to_string(), handler);
+        handlers.insert(tool_name.to_string(), Arc::from(handler));
     }
 
     pub async fn serve(&self, addr: &str) -> Result<(), KarduunMcpError> {
-        // For now, implement a simple TCP server
-        // TODO: Use proper MCP transport layer
+        use std::sync::Arc;
+        use tokio_tungstenite::accept_async;
+
         let listener = tokio::net::TcpListener::bind(addr).await?;
-        println!("Karduun MCP Server listening on {}", addr);
+        println!("Karduun MCP Server (WebSocket) listening on ws://{}", addr);
 
         loop {
-            let (socket, _) = listener.accept().await?;
-            let server = self.clone();
+            let (stream, _) = listener.accept().await?;
+            let server_handler = self.clone();
 
             tokio::spawn(async move {
-                if let Err(e) = server.handle_connection(socket).await {
-                    eprintln!("Connection error: {}", e);
+                // Perform WebSocket handshake
+                let ws_stream = match accept_async(stream).await {
+                    Ok(ws) => ws,
+                    Err(e) => {
+                        eprintln!("WebSocket handshake error: {}", e);
+                        return;
+                    }
+                };
+
+                // Create WebSocket transport
+                let transport =
+                    mcp_sdk_rs::transport::websocket::WebSocketTransport::from_stream(ws_stream);
+
+                // Create MCP server with transport and handler
+                let server =
+                    mcp_sdk_rs::server::Server::new(Arc::new(transport), Arc::new(server_handler));
+
+                // Start the server for this connection
+                if let Err(e) = server.start().await {
+                    eprintln!("WebSocket connection error: {}", e);
                 }
             });
         }
     }
 
-    async fn handle_connection(
-        &self,
-        _socket: tokio::net::TcpStream,
-    ) -> Result<(), KarduunMcpError> {
-        // TODO: Implement proper MCP protocol handling
-        Ok(())
+    pub async fn handle_method(&self, method: &str, params: Option<Value>) -> Result<Value, Error> {
+        let tool_name = method.split('.').next().unwrap_or("");
+
+        // Create a simple request-like structure for our handlers
+        let simple_request = Request {
+            id: RequestId::Number(0),
+            jsonrpc: "2.0".to_string(),
+            method: method.to_string(),
+            params,
+        };
+
+        // Simple approach: execute handler while holding the lock
+        // Get handler while holding the lock
+        let handler = {
+            let handlers = self.handlers.lock().unwrap();
+            handlers.get(tool_name).cloned()
+        };
+
+        // Execute handler outside the lock
+        if let Some(handler) = handler {
+            let state = self.state.clone();
+            // Convert our error type to the MCP SDK error type
+            handler
+                .handle_request(&state, simple_request)
+                .await
+                .map_err(|e| {
+                    Error::protocol(
+                        mcp_sdk_rs::error::ErrorCode::InternalError,
+                        format!("Handler error: {}", e),
+                    )
+                })
+        } else {
+            Err(Error::protocol(
+                mcp_sdk_rs::error::ErrorCode::MethodNotFound,
+                format!("Method {} not found", method),
+            ))
+        }
     }
 }
 
@@ -98,36 +147,6 @@ impl ServerHandler for KarduunMcpServer {
     }
 
     async fn handle_method(&self, method: &str, params: Option<Value>) -> Result<Value, Error> {
-        let tool_name = method.split('.').next().unwrap_or("");
-
-        // Create a simple request-like structure for our handlers
-        let simple_request = Request {
-            id: RequestId::Number(0),
-            jsonrpc: "2.0".to_string(),
-            method: method.to_string(),
-            params,
-        };
-
-        // Simple approach: execute handler while holding the lock
-        // This is not ideal for performance but avoids complex lifetime issues
-        let handlers = self.handlers.lock().unwrap();
-        if let Some(handler) = handlers.get(tool_name) {
-            // Execute handler synchronously within the lock
-            let state = self.state.clone();
-            let simple_request = simple_request.clone();
-
-            // Use block_on to execute the async handler
-            let result = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(async { handler.handle_request(&state, simple_request).await })
-            });
-
-            result.map_err(|e| Error::protocol(ErrorCode::InternalError, e.to_string()))
-        } else {
-            Err(Error::protocol(
-                ErrorCode::MethodNotFound,
-                format!("Method not found: {}", method),
-            ))
-        }
+        self.handle_method(method, params).await
     }
 }

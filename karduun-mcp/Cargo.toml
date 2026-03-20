@@ -18,6 +18,7 @@ serde_json = "1.0"
 anyhow = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 async-trait = "0.1.89"
+tokio-tungstenite = "0.20"
 thiserror.workspace = true
 chrono.workspace = true
 hmac = "0.12.1"
