@@ -2,9 +2,19 @@
 
 A comprehensive Rust CLI toolkit for managing atomic cards and self-organizing decks. Cards are stored as YAML+Markdown files with a hidden `.cardstack/` workspace for indexes and cache. The suite is split into 8 composable tools that communicate via JSONL streams.
 
+## Background
+
+In an age of **information overload**, where attention is fragmented and digital interactions are fleeting, education faces a paradox: knowledge is more abundant than ever, yet _shared understanding_ is increasingly rare.
+
+The **Knowledge Card Ecology** addresses this problem by turning abstract knowledge into **tangible, living artifacts**. It transforms the passive consumption of information into an _ecological, playful, and community-based process_ of co-creation. In this system, ideas are printed as collectible cards that evolve, circulate, and reproduce based on how people engage with them, mirroring the organic flow of human thought and cultural evolution.
+
 ## Vision
 
 **Small, True, and Composable**: Everything worth thinking about can be represented as finite cards and composable decks. A card is the smallest honest unit of meaning; a deck is a lens (static list or query) that arranges cards for a purpose.
+
+## Goals
+
+We create a **self-sustaining ecosystem of knowledge** expressed through collectible, tangible cards. Each card embodies a concept with a bounded semantic volume. Through limited printing and intelligent feedback, ideas evolve organically as the **community** interacts with them. There is no tracking of individuals, no scores, and no rules to read. Just **curiosity shaping emergence**.
 
 ## Principles
 
