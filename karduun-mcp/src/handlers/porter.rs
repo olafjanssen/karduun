@@ -4,7 +4,6 @@ use cardstack_lib::card::{Card, CardEnvelope};
 use mcp_sdk_rs::{Notification, Request};
 use serde_json::{json, Value};
 
-
 #[derive(Clone)]
 pub struct PorterHandler;
 
@@ -119,6 +118,7 @@ impl PorterHandler {
                 }))
             }
             "markdown" => {
+                let cards_to_export_len = cards_to_export.len();
                 let markdown_output = cards_to_export
                     .into_iter()
                     .map(|card| {
@@ -144,7 +144,7 @@ impl PorterHandler {
                     "format": "markdown",
                     "exported_cards": cards_to_export_len,
                     "data": markdown_output,
-                    "message": format!("Exported {} cards in Markdown format", cards_to_export.len())
+                    "message": format!("Exported {} cards in Markdown format", cards_to_export_len)
                 }))
             }
             _ => Err(KarduunMcpError::InvalidRequest(format!(
@@ -180,7 +180,25 @@ impl PorterHandler {
                             if let Ok(envelope) =
                                 serde_json::from_value::<CardEnvelope>(value.clone())
                             {
-                                Some(envelope.into_raw())
+                                Some(Card {
+                                    kind: "card".to_string(),
+                                    schema: 1,
+                                    uid: envelope.uid.clone(),
+                                    slug: envelope.slug.clone(),
+                                    title: envelope.title.clone(),
+                                    author: None,
+                                    created: envelope.created,
+                                    updated: envelope.updated,
+                                    version: 1,
+                                    tags: envelope.tags.clone(),
+                                    keywords: Vec::new(),
+                                    fields: envelope.fields.clone(),
+                                    links: envelope.links_out.clone(),
+                                    facets: None,
+                                    sign: None,
+                                    publications: Vec::new(),
+                                    computed: None,
+                                })
                             } else if let Ok(card) = serde_json::from_value::<Card>(value.clone()) {
                                 Some(card)
                             } else {
@@ -191,7 +209,25 @@ impl PorterHandler {
                 } else {
                     // Try single card
                     if let Ok(envelope) = serde_json::from_value::<CardEnvelope>(data.clone()) {
-                        vec![envelope.into_raw()]
+                        vec![Card {
+                            kind: "card".to_string(),
+                            schema: 1,
+                            uid: envelope.uid.clone(),
+                            slug: envelope.slug.clone(),
+                            title: envelope.title.clone(),
+                            author: None,
+                            created: envelope.created,
+                            updated: envelope.updated,
+                            version: 1,
+                            tags: envelope.tags.clone(),
+                            keywords: Vec::new(),
+                            fields: envelope.fields.clone(),
+                            links: envelope.links_out.clone(),
+                            facets: None,
+                            sign: None,
+                            publications: Vec::new(),
+                            computed: None,
+                        }]
                     } else if let Ok(card) = serde_json::from_value::<Card>(data.clone()) {
                         vec![card]
                     } else {
@@ -211,7 +247,25 @@ impl PorterHandler {
                                 return None;
                             }
                             if let Ok(envelope) = serde_json::from_str::<CardEnvelope>(line) {
-                                Some(envelope.into_raw())
+                                Some(Card {
+                                    kind: "card".to_string(),
+                                    schema: 1,
+                                    uid: envelope.uid.clone(),
+                                    slug: envelope.slug.clone(),
+                                    title: envelope.title.clone(),
+                                    author: None,
+                                    created: envelope.created,
+                                    updated: envelope.updated,
+                                    version: 1,
+                                    tags: envelope.tags.clone(),
+                                    keywords: Vec::new(),
+                                    fields: envelope.fields.clone(),
+                                    links: envelope.links_out.clone(),
+                                    facets: None,
+                                    sign: None,
+                                    publications: Vec::new(),
+                                    computed: None,
+                                })
                             } else if let Ok(card) = serde_json::from_str::<Card>(line) {
                                 Some(card)
                             } else {
@@ -234,7 +288,7 @@ impl PorterHandler {
         };
 
         let mut imported_count = 0;
-        let mut skipped_count = 0;
+        let skipped_count = 0;
         let mut error_count = 0;
 
         for mut card in cards_to_import {

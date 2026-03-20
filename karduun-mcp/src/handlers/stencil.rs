@@ -4,7 +4,6 @@ use cardstack_lib::card::{Card, CardEnvelope};
 use mcp_sdk_rs::{Notification, Request};
 use serde_json::{json, Value};
 
-
 #[derive(Clone)]
 pub struct StencilHandler;
 
@@ -53,7 +52,8 @@ impl StencilHandler {
             .get("slug")
             .and_then(|v| v.as_str())
             .unwrap_or_else(|| {
-                name.to_lowercase()
+                let generated_slug = name
+                    .to_lowercase()
                     .chars()
                     .map(|c| {
                         if c.is_alphanumeric() || c == '-' {
@@ -62,7 +62,8 @@ impl StencilHandler {
                             '-'
                         }
                     })
-                    .collect::<String>()
+                    .collect::<String>();
+                Box::leak(generated_slug.into_boxed_str())
             });
 
         let repo_root = state.repo_root.lock().await;
@@ -70,7 +71,7 @@ impl StencilHandler {
         // Create a template card
         let mut template_card = Card::new(
             format!("Template: {}", name),
-            slug,
+            slug.to_string(),
             cardstack_lib::uid::generate_uid(),
         );
 
@@ -172,7 +173,7 @@ impl StencilHandler {
             )));
         }
 
-        let envelope = CardEnvelope::from(card);
+        let envelope = CardEnvelope::from(card.clone());
 
         // Extract template-specific information
         let template_info = json!({
@@ -182,7 +183,7 @@ impl StencilHandler {
             "constraints": card.fields.get("template_constraints"),
             "fields": card.fields.iter()
                 .filter(|(k, _)| k.starts_with("template_field_"))
-                .map(|(k, v)| (k.strip_prefix("template_field_").unwrap(), v.clone()))
+                .map(|(k, v)| (k.strip_prefix("template_field_").unwrap().to_string(), v.clone()))
                 .collect::<serde_json::Map<String, serde_json::Value>>(),
             "created": card.created,
             "updated": card.updated

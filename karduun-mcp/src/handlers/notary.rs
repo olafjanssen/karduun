@@ -4,7 +4,6 @@ use cardstack_lib::card::CardEnvelope;
 use mcp_sdk_rs::{Notification, Request};
 use serde_json::{json, Value};
 
-
 #[derive(Clone)]
 pub struct NotaryHandler;
 
@@ -161,7 +160,7 @@ impl NotaryHandler {
         // If the card has a signature, we can also sign the timestamp
         if card.fields.contains_key("signature") {
             let timestamp_signature =
-                self.create_signature(timestamp.to_rfc3339(), "auto-generated-key");
+                self.create_signature(&timestamp.to_rfc3339(), "auto-generated-key");
             card.fields.insert(
                 "timestamp_signature".to_string(),
                 json!(timestamp_signature),
@@ -186,7 +185,7 @@ impl NotaryHandler {
         // Simple signature algorithm for demonstration
         // In production, you would use proper cryptographic signing
         use hmac::{Hmac, Mac};
-        use sha2::{Digest, Sha256};
+        use sha2::Sha256;
 
         type HmacSha256 = Hmac<Sha256>;
 

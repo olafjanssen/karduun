@@ -4,7 +4,6 @@ use cardstack_lib::card::{Card, CardEnvelope};
 use mcp_sdk_rs::{Notification, Request};
 use serde_json::{json, Value};
 
-
 #[derive(Clone)]
 pub struct EcoHandler;
 
@@ -406,7 +405,7 @@ impl EcoHandler {
         let cards = cardstack_lib::repository::load_all_cards(&repo_root)?;
 
         // Find mature cards that can evolve
-        let mature_cards: Vec<_> = cards
+        let mature_cards: Vec<&Card> = cards
             .iter()
             .filter(|(_, card)| {
                 card.fields
@@ -414,6 +413,7 @@ impl EcoHandler {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false)
             })
+            .map(|(_, card)| card)
             .collect();
 
         if mature_cards.is_empty() {
@@ -426,7 +426,7 @@ impl EcoHandler {
         // Group mature cards by similarity (simple implementation)
         let mut evolution_clusters: Vec<Vec<&Card>> = Vec::new();
 
-        for card in mature_cards {
+        for card in &mature_cards {
             // Find a cluster with similar cards or create a new one
             let mut found_cluster = false;
             for cluster in &mut evolution_clusters {
@@ -514,7 +514,7 @@ impl EcoHandler {
         (scan_score + print_score + resonance_score).min(100.0)
     }
 
-    fn are_cards_similar(&self, card1: &&Card, card2: &&Card) -> bool {
+    fn are_cards_similar(&self, card1: &Card, card2: &Card) -> bool {
         // Simple similarity heuristic
         // In production, you might use NLP or other advanced techniques
 
