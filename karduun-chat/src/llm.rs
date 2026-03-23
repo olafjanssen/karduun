@@ -19,14 +19,8 @@ impl LLMBackend {
     ) -> Self {
         match backend {
             "ollama" => {
-                // Construct the full API URL for Ollama
-                let api_url = if ollama_url.ends_with("/api/chat") {
-                    ollama_url.to_string()
-                } else if ollama_url.ends_with("/") {
-                    format!("{}api/chat", ollama_url)
-                } else {
-                    format!("{}/api/chat", ollama_url)
-                };
+                // Use the base Ollama URL - the llm crate will construct the full API path
+                let api_url = ollama_url.to_string();
 
                 LLMBackend::Ollama(Ollama::new(
                     api_url,

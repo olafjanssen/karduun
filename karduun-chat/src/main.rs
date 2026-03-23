@@ -25,8 +25,8 @@ struct Args {
     #[arg(short, long, default_value = "ollama")]
     llm: String,
 
-    /// LLM Model (default: llama3 for Ollama)
-    #[arg(short, long, default_value = "llama3")]
+    /// LLM Model (default: llama3.2:3b for Ollama)
+    #[arg(short, long, default_value = "llama3.2:3b")]
     model: String,
 
     /// Ollama URL (default: http://localhost:11434)
@@ -315,24 +315,38 @@ fn ui(frame: &mut Frame, app: &App) {
 
     let [messages_area, input_area] = vertical.areas(frame.size());
 
-    // Messages
-    let messages: Vec<ListItem> = app
+    // Messages with word wrapping
+    let messages_text: Vec<Line> = app
         .messages
         .iter()
-        .map(|msg| {
-            let content = Line::from(msg.content.clone());
-            if msg.is_user {
-                ListItem::new(content).style(Style::default().fg(Color::Green))
+        .flat_map(|msg| {
+            let color = if msg.is_user {
+                Color::Green
             } else {
-                ListItem::new(content).style(Style::default().fg(Color::Blue))
+                Color::Blue
+            };
+            let styled_content = msg
+                .content
+                .split('\n')
+                .map(|line| Line::from(line.to_string()).style(Style::default().fg(color)))
+                .collect::<Vec<Line>>();
+
+            // Add empty line between messages for spacing
+            if styled_content.is_empty() {
+                vec![Line::from("")]
+            } else {
+                let mut result = styled_content;
+                result.push(Line::from("")); // Add spacing after each message
+                result
             }
         })
         .collect();
 
-    let messages_list =
-        List::new(messages).block(Block::default().borders(Borders::ALL).title("Karduun Chat"));
+    let messages_paragraph = Paragraph::new(messages_text)
+        .block(Block::default().borders(Borders::ALL).title("Karduun Chat"))
+        .wrap(Wrap { trim: true });
 
-    frame.render_widget(messages_list, messages_area);
+    frame.render_widget(messages_paragraph, messages_area);
 
     // Input
     let input = Paragraph::new(app.input.as_str())
